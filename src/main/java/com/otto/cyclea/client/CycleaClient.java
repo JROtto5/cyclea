@@ -33,9 +33,9 @@ public class CycleaClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         toggleKey = KeyMappingHelper.registerKeyMapping(
-            new KeyMapping("key.cyclea.toggle", GLFW.GLFW_KEY_G, CATEGORY));
+            new KeyMapping("key.cyclea.toggle", GLFW.GLFW_KEY_LEFT_BRACKET, CATEGORY));
         cycleKey = KeyMappingHelper.registerKeyMapping(
-            new KeyMapping("key.cyclea.cycle", GLFW.GLFW_KEY_B, CATEGORY));
+            new KeyMapping("key.cyclea.cycle", GLFW.GLFW_KEY_RIGHT_BRACKET, CATEGORY));
 
         ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
     }
@@ -70,8 +70,10 @@ public class CycleaClient implements ClientModInitializer {
 
     private void reportNearest(Minecraft mc, List<BlockPos> found) {
         if (found.isEmpty()) {
-            say(mc, "§7Cyclea: no " + CycleaState.get().getTarget().label
-                + " within " + CycleaState.get().getRadius() + " blocks");
+            String where = CycleaState.get().getTarget() == CycleaState.Target.CAVES
+                ? " within " + CycleaState.get().getRadius() + " blocks"
+                : " in loaded chunks";
+            say(mc, "§7Cyclea: no " + CycleaState.get().getTarget().label + where);
             return;
         }
         BlockPos me = mc.player.blockPosition();

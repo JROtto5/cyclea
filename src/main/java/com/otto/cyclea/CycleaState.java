@@ -19,7 +19,7 @@ public final class CycleaState {
 
     /** The kinds of things Cyclea can hunt for. Cycle through them with the key. */
     public enum Target {
-        CHESTS("Chests & Loot", 0x00E5FF),
+        CHESTS("Chests, Shulkers & Ender", 0x00E5FF),
         SPAWNERS("Spawners & Vaults", 0xFF4D4D),
         VILLAGES("Villages", 0x8CFF66),
         CAVES("Caves", 0xFFB300);

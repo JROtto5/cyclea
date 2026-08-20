@@ -6,23 +6,27 @@ nearest one — a "mod-of-mods" companion that pairs with any minimap.
 
 > By **John Rydell** · MIT licensed · single-player / your-own-server use.
 
-## Features (v1.0)
+## Features (v1.1)
 
-- **Cycle targets** on a keypress: Chests & Loot → Spawners & Vaults → Villages → Caves.
+- **Cycle targets** on a keypress: Chests → Spawners & Vaults → Villages → Caves.
+- **Chests target** covers regular + trapped chests, **ender chests**, barrels, and
+  **all shulker boxes** (every color) — matched by block-entity type.
+- **Whole-render-distance scan** for chests/spawners via loaded block entities —
+  no radius ceiling, no lag from a cube scan.
 - **Nearest-target pointer** in chat: count, distance, compass heading, and exact
-  coordinates of the closest match — e.g. `Cyclea ▶ 3 Chests & Loot — nearest 42m NE (128, 41, -76)`.
-- **Adjustable scan radius** (16–128 blocks), bounded so it stays cheap on FPS.
+  coordinates — e.g. `Cyclea ▶ 3 Chests, Shulkers & Ender — nearest 42m NE (128, 41, -76)`.
 - Scans a few times a second on a background cadence.
 
-**Roadmap:** in-world guide-beams (rendered lines to each target) once the new
-26.2 render pipeline is wired up; Xaero's waypoint export.
+**Roadmap:** in-world guide-beams (rendered lines/arrows to each target). The
+26.2 render pipeline moved to a deferred `SubmitNodeCollector` model; the hook is
+`LevelRenderEvents.BEFORE_GIZMOS` + `submitCustomGeometry`, still being wired up.
 
 ## Controls
 
 | Key | Action |
 |-----|--------|
-| `G` | Toggle the finder on/off |
-| `B` | Cycle to the next target type |
+| `[` | Toggle the finder on/off |
+| `]` | Cycle to the next target type |
 
 Both are rebindable in **Options → Controls → Cyclea**.
 
@@ -37,13 +41,13 @@ Two ways — pick either.
 
 ```bash
 MCROOT=~/.minecraft ./build-noloom.sh
-# -> cyclea-1.0.0.jar  (drop into ~/.minecraft/mods/)
+# -> cyclea-1.1.0.jar  (drop into ~/.minecraft/mods/)
 ```
 
 ### B) Conventional Gradle + Loom
 
 ```bash
-./gradlew build   # build/libs/cyclea-1.0.0.jar
+./gradlew build   # build/libs/cyclea-1.1.0.jar
 ```
 
 > Loom needs Mojang's official mapping file for your version. If it errors with
