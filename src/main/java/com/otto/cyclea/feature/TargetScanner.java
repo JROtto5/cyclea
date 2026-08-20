@@ -49,14 +49,26 @@ public final class TargetScanner {
                     // ChestBlockEntity also covers trapped chests (its subclass)
                     if (be instanceof ChestBlockEntity
                         || be instanceof EnderChestBlockEntity
-                        || be instanceof BarrelBlockEntity
-                        || be instanceof ShulkerBoxBlockEntity) {
+                        || be instanceof BarrelBlockEntity) {
+                        if (be.getBlockPos().getY() <= CycleaState.DEEP_MAX_Y) {
+                            hits.add(be.getBlockPos());
+                        }
+                    }
+                }
+            }
+            case SHULKERS -> {
+                // shulkers everywhere, every level
+                for (BlockEntity be : loadedBlockEntities(mc, level)) {
+                    if (be instanceof ShulkerBoxBlockEntity) {
                         hits.add(be.getBlockPos());
                     }
                 }
             }
             case SPAWNERS -> {
                 for (BlockEntity be : loadedBlockEntities(mc, level)) {
+                    if (be.getBlockPos().getY() > CycleaState.DEEP_MAX_Y) {
+                        continue;
+                    }
                     BlockState s = level.getBlockState(be.getBlockPos());
                     if (s.is(Blocks.SPAWNER) || s.is(Blocks.TRIAL_SPAWNER) || s.is(Blocks.VAULT)) {
                         hits.add(be.getBlockPos());
@@ -114,6 +126,38 @@ public final class TargetScanner {
             }
         }
         return out;
+    }
+
+    /**
+     * Groups positions that sit close together (a "clump" — double chests,
+     * shulker walls, storage rooms) into cluster centers. Only groups of at
+     * least {@code minSize} are returned, each as the position of its first
+     * member. Simple flood-fill; fine for the counts a client sees.
+     */
+    public static List<BlockPos> clumps(List<BlockPos> pts, int reach, int minSize) {
+        List<BlockPos> centers = new ArrayList<>();
+        boolean[] used = new boolean[pts.size()];
+        for (int i = 0; i < pts.size(); i++) {
+            if (used[i]) {
+                continue;
+            }
+            List<Integer> group = new ArrayList<>();
+            group.add(i);
+            used[i] = true;
+            for (int g = 0; g < group.size(); g++) {
+                BlockPos a = pts.get(group.get(g));
+                for (int j = 0; j < pts.size(); j++) {
+                    if (!used[j] && a.distManhattan(pts.get(j)) <= reach) {
+                        used[j] = true;
+                        group.add(j);
+                    }
+                }
+            }
+            if (group.size() >= minSize) {
+                centers.add(pts.get(group.get(0)));
+            }
+        }
+        return centers;
     }
 
     private static List<BlockPos> dedupeNearby(List<BlockPos> in, int minDist) {

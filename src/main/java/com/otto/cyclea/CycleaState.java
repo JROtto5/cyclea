@@ -17,10 +17,14 @@ public final class CycleaState {
         return INSTANCE;
     }
 
+    /** Chests, spawners and vaults are only reported at or below this Y (deep loot). */
+    public static final int DEEP_MAX_Y = 20;
+
     /** The kinds of things Cyclea can hunt for. Cycle through them with the key. */
     public enum Target {
-        CHESTS("Chests, Shulkers & Ender", 0x00E5FF),
-        SPAWNERS("Spawners & Vaults", 0xFF4D4D),
+        CHESTS("Chests & Barrels (≤Y20)", 0x00E5FF),
+        SHULKERS("Shulkers (all levels)", 0xD070FF),
+        SPAWNERS("Spawners & Vaults (≤Y20)", 0xFF4D4D),
         VILLAGES("Villages", 0x8CFF66),
         CAVES("Caves", 0xFFB300);
 

@@ -6,11 +6,15 @@ nearest one — a "mod-of-mods" companion that pairs with any minimap.
 
 > By **John Rydell** · MIT licensed · single-player / your-own-server use.
 
-## Features (v1.1)
+## Features (v1.2)
 
-- **Cycle targets** on a keypress: Chests → Spawners & Vaults → Villages → Caves.
-- **Chests target** covers regular + trapped chests, **ender chests**, barrels, and
-  **all shulker boxes** (every color) — matched by block-entity type.
+- **Cycle targets** on a keypress: Chests (≤Y20) → Shulkers (all levels) → Spawners & Vaults (≤Y20) → Villages → Caves.
+- **Dedicated Shulker finder** (all 17 colors, every Y level), separate from chests.
+- **Deep-loot filter:** chests/barrels/ender chests and spawners/vaults are only
+  reported at **Y ≤ 20** — cuts surface clutter, surfaces buried bases & dungeons.
+- **Clump alert:** when chests or shulkers are bunched together (double chests,
+  storage rooms, shulker walls) Cyclea flags it in **red** — `⚠ CLUMP found!` —
+  so a stash stands out from a lone chest.
 - **Whole-render-distance scan** for chests/spawners via loaded block entities —
   no radius ceiling, no lag from a cube scan.
 - **Nearest-target pointer** in chat: count, distance, compass heading, and exact

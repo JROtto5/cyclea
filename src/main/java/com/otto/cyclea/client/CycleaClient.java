@@ -77,20 +77,44 @@ public class CycleaClient implements ClientModInitializer {
             return;
         }
         BlockPos me = mc.player.blockPosition();
-        BlockPos best = found.get(0);
+        CycleaState.Target target = CycleaState.get().getTarget();
+
+        // Look for clumps first (double chests, shulker walls, storage rooms).
+        boolean clumpable = target == CycleaState.Target.CHESTS
+            || target == CycleaState.Target.SHULKERS
+            || target == CycleaState.Target.SPAWNERS;
+        if (clumpable) {
+            List<BlockPos> clumps = TargetScanner.clumps(found, 3, 2);
+            if (!clumps.isEmpty()) {
+                BlockPos c = nearest(me, clumps);
+                int cd = (int) Math.sqrt(me.distSqr(c));
+                say(mc, "§c⚠ CLUMP found! §f" + clumps.size() + " "
+                    + target.label + " clump" + (clumps.size() > 1 ? "s" : "")
+                    + " §7— nearest §f" + cd + "m " + heading(c.getX() - me.getX(), c.getZ() - me.getZ())
+                    + " §c(" + c.getX() + ", " + c.getY() + ", " + c.getZ() + ")");
+                return;
+            }
+        }
+
+        BlockPos best = nearest(me, found);
+        int dist = (int) Math.sqrt(me.distSqr(best));
+        String dir = heading(best.getX() - me.getX(), best.getZ() - me.getZ());
+        say(mc, "§bCyclea ▶ §f" + found.size() + " " + target.label
+            + "§7 — nearest §f" + dist + "m " + dir
+            + " §8(" + best.getX() + ", " + best.getY() + ", " + best.getZ() + ")");
+    }
+
+    private static BlockPos nearest(BlockPos me, List<BlockPos> pts) {
+        BlockPos best = pts.get(0);
         double bestD = Double.MAX_VALUE;
-        for (BlockPos p : found) {
+        for (BlockPos p : pts) {
             double d = me.distSqr(p);
             if (d < bestD) {
                 bestD = d;
                 best = p;
             }
         }
-        int dist = (int) Math.sqrt(bestD);
-        String dir = heading(best.getX() - me.getX(), best.getZ() - me.getZ());
-        say(mc, "§bCyclea ▶ §f" + found.size() + " " + CycleaState.get().getTarget().label
-            + "§7 — nearest §f" + dist + "m " + dir
-            + " §8(" + best.getX() + ", " + best.getY() + ", " + best.getZ() + ")");
+        return best;
     }
 
     private static String heading(int dx, int dz) {
