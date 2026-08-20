@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "cyclea",
+  "version": "${version}",
+  "name": "Cyclea",
+  "description": "A finder that draws guide-lines to chests, spawners, villages and caves. Cycle targets with a key, watch them ping in-world and on your HUD. A mod-of-mods companion for your minimap.",
+  "authors": ["John Rydell"],
+  "contact": {
+    "homepage": "https://github.com/JROtto5/cyclea",
+    "sources": "https://github.com/JROtto5/cyclea"
+  },
+  "license": "MIT",
+  "icon": "assets/cyclea/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.otto.cyclea.client.CycleaClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.0",
+    "minecraft": "26.2",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
