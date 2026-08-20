@@ -6,3 +6,5 @@ run/
 .idea/
 *.iml
 .DS_Store
+out/
+*.jar
