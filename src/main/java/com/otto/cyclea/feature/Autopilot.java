@@ -175,7 +175,7 @@ public final class Autopilot {
         if (active) {
             approaching = false;
             if (mc.player != null) {
-                targetY = mc.player.blockPosition().getY();   // hold the depth you start at
+                targetY = -59;   // default diamond level, just above bedrock
                 retarget(mc);
             }
         } else {
@@ -380,7 +380,7 @@ public final class Autopilot {
         // 7) if we're already committed to a block, keep on it until it's gone
         //    (holding one target is what keeps the camera steady instead of jerking).
         if (mining != null && !passable(mc, mining) && !hazard(mc, mining)
-            && !hasHazardNeighbor(mc, mining)) {
+            && !hasHazardNeighbor(mc, mining) && !isUnbreakable(mc.level.getBlockState(mining))) {
             selectToolFor(mc, mc.level.getBlockState(mining));
             key(mc, mc.options.keyUp, false);
             aimAt(player, center(mining));
@@ -398,8 +398,9 @@ public final class Autopilot {
             } else if (!passable(mc, aheadFeet)) {
                 target = aheadFeet;
             } else if (feet.getY() > targetY && !passable(mc, aheadFeet.below())
-                && !hazard(mc, aheadFeet.below()) && !hasHazardNeighbor(mc, aheadFeet.below())) {
-                target = aheadFeet.below();   // staircase back down toward Y-59
+                && !hazard(mc, aheadFeet.below()) && !hasHazardNeighbor(mc, aheadFeet.below())
+                && !isUnbreakable(mc.level.getBlockState(aheadFeet.below()))) {
+                target = aheadFeet.below();   // staircase down toward Y-59 (never into bedrock)
             }
         }
 
@@ -498,14 +499,26 @@ public final class Autopilot {
         return true;
     }
 
-    /** A block is OK to move through: not a hazard to enter, and if solid (we'd
-     *  mine it) it has no lava/water neighbor that would flood in when broken. */
+    /** A block is OK to move through: not a hazard to enter, not unbreakable, and
+     *  if solid (we'd mine it) with no lava/water neighbor that would flood in. */
     private static boolean travelOk(Minecraft mc, BlockPos pos) {
         BlockState st = mc.level.getBlockState(pos);
         if (st.is(Blocks.LAVA) || st.is(Blocks.WATER)) {
             return false;
         }
-        return passable(mc, pos) || !hasHazardNeighbor(mc, pos);
+        if (passable(mc, pos)) {
+            return true;
+        }
+        if (isUnbreakable(st)) {
+            return false;   // bedrock etc. — can't dig it, route around
+        }
+        return !hasHazardNeighbor(mc, pos);
+    }
+
+    /** Blocks the autopilot can never mine — treat as walls to go around. */
+    private static boolean isUnbreakable(BlockState st) {
+        return st.is(Blocks.BEDROCK) || st.is(Blocks.BARRIER)
+            || st.is(Blocks.REINFORCED_DEEPSLATE) || st.is(Blocks.END_PORTAL_FRAME);
     }
 
     /** Any of the 6 neighbors is lava or water (so mining this block risks a flood). */

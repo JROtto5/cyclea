@@ -108,6 +108,9 @@ public final class Pathfinder {
         if (passable(st)) {
             return 0.0;
         }
+        if (st.is(Blocks.BEDROCK) || st.is(Blocks.BARRIER) || st.is(Blocks.REINFORCED_DEEPSLATE)) {
+            return null;   // unbreakable — route around
+        }
         if (hasHazardNeighbor(mc, p)) {
             return null;   // mining it would flood
         }
