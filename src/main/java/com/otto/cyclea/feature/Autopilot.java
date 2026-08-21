@@ -7,10 +7,13 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
 
@@ -32,8 +35,10 @@ public final class Autopilot {
     }
 
     private boolean active = false;
-    private int targetX = 0;   // spawn
+    private int targetX = 0;      // spawn (the sweep goal)
     private int targetZ = 0;
+    private int targetY = -59;    // depth to hold / return to
+    private boolean approaching = false;   // true while navigating to a found base
     private boolean eating = false;
     private int prevSlot = -1;
     private int scanTick = 0;
@@ -60,7 +65,12 @@ public final class Autopilot {
 
     public boolean toggle(Minecraft mc) {
         active = !active;
-        if (!active) {
+        if (active) {
+            approaching = false;
+            if (mc.player != null) {
+                targetY = mc.player.blockPosition().getY();   // hold the depth you start at
+            }
+        } else {
             releaseAll(mc);
         }
         return active;
@@ -93,19 +103,22 @@ public final class Autopilot {
             return;
         }
 
-        // 2) base found? (throttled — scanning every tick would lag) report + halt
-        if (++scanTick >= 10) {
+        // 2) base found? (throttled — scanning every tick would lag)
+        //    switch to navigating toward it; we hand control back on arrival.
+        if (!approaching && ++scanTick >= 40) {
             scanTick = 0;
             TargetScanner.Scan scan = TargetScanner.scan(mc);
             if (!scan.bases().isEmpty()) {
                 TargetScanner.Base best = richest(scan.bases());
-                releaseAll(mc);
+                MinimapBridge.pushBases(scan.bases());
+                targetX = best.center().getX();
+                targetZ = best.center().getZ();
+                approaching = true;
+                mc.player.playSound(net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 1.4f);
                 say(mc, "§a★ BASE FOUND §f" + best.chests() + " chests, " + best.shulkers()
                     + " shulkers §7at §f" + best.center().getX() + "," + best.center().getY()
-                    + "," + best.center().getZ() + " §7— " + lootRating(best));
-                MinimapBridge.pushBases(scan.bases());
-                active = false;
-                return;
+                    + "," + best.center().getZ() + " §7— " + lootRating(best)
+                    + " §e→ navigating there…");
             }
         }
 
@@ -120,52 +133,98 @@ public final class Autopilot {
             return;
         }
 
-        // 5) aim toward the target (horizontal tunnel)
+        // 5) travel direction toward the target
         double dx = targetX - player.getX();
         double dz = targetZ - player.getZ();
-        if (Math.abs(dx) < 2 && Math.abs(dz) < 2) {
-            stop(mc, "reached target area");
+        if (Math.abs(dx) < 3 && Math.abs(dz) < 3) {
+            if (approaching) {
+                approaching = false;
+                targetX = 0;   // restore the sweep goal (spawn) for next time
+                targetZ = 0;
+                stop(mc, "§a✔ arrived at base — §fyour turn (press O to resume toward spawn)");
+            } else {
+                stop(mc, "reached target area");
+            }
             return;
         }
-        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        player.setYRot(yaw);
-        player.setXRot(0f);
-        Direction dir = Direction.fromYRot(yaw);
+        float travelYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
+        Direction dir = Direction.fromYRot(travelYaw);
 
         BlockPos feet = player.blockPosition();
         BlockPos aheadFeet = feet.relative(dir);
         BlockPos aheadHead = aheadFeet.above();
 
-        // 6) lava / hazard guard
-        if (isLava(mc, aheadFeet) || isLava(mc, aheadHead)
-            || isLava(mc, aheadFeet.below()) || isLava(mc, feet.below())) {
-            stop(mc, "§clava ahead");
+        // 6) hazard guard — lava AND water
+        if (hazard(mc, aheadFeet) || hazard(mc, aheadHead)
+            || hazard(mc, aheadFeet.below()) || hazard(mc, feet.below())) {
+            stop(mc, isLava(mc, aheadFeet) || isLava(mc, aheadHead)
+                || isLava(mc, aheadFeet.below()) || isLava(mc, feet.below())
+                ? "§clava ahead" : "§bwater ahead");
             return;
         }
 
-        // 7) mine what's in the way, else walk forward
-        boolean headBlocked = !passable(mc, aheadHead);
-        boolean feetBlocked = !passable(mc, aheadFeet);
-        if (headBlocked) {
-            mine(mc, aheadHead, dir);
-        } else if (feetBlocked) {
-            mine(mc, aheadFeet, dir);
+        // 7) pick the block to clear: head, then feet, then (if too shallow) descend
+        BlockPos target = null;
+        if (!passable(mc, aheadHead)) {
+            target = aheadHead;
+        } else if (!passable(mc, aheadFeet)) {
+            target = aheadFeet;
+        } else if (feet.getY() > targetY && !passable(mc, aheadFeet.below())
+            && !hazard(mc, aheadFeet.below())) {
+            target = aheadFeet.below();   // staircase back down toward Y-59
+        }
+
+        if (target != null) {
+            // smoothly look AT the block, then let vanilla break what we're aiming at
+            aimAt(player, center(target));
+            key(mc, mc.options.keyUp, false);
+            if (lookingAt(mc, target)) {
+                key(mc, mc.options.keyAttack, true);   // real, server-valid break
+            } else {
+                key(mc, mc.options.keyAttack, false);  // still turning — don't fake-break
+            }
         } else {
-            // clear ahead — check we're not about to walk off a deep ledge
+            // path clear: face travel direction, then walk
+            key(mc, mc.options.keyAttack, false);
+            mc.gameMode.stopDestroyBlock();
+            aim(player, travelYaw, 0f);
             if (passable(mc, aheadFeet.below()) && passable(mc, aheadFeet.below().below())) {
                 stop(mc, "§edrop ahead (avoiding a fall)");
                 return;
             }
-            mc.gameMode.stopDestroyBlock();
-            key(mc, mc.options.keyAttack, false);
-            key(mc, mc.options.keyUp, true);
+            boolean facing = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 25f;
+            key(mc, mc.options.keyUp, facing);
         }
     }
 
-    private void mine(Minecraft mc, BlockPos pos, Direction dir) {
-        key(mc, mc.options.keyUp, false);
-        mc.gameMode.continueDestroyBlock(pos, dir.getOpposite());
-        key(mc, mc.options.keyAttack, false);
+    private static final float TURN_SPEED = 16f;   // degrees per tick — human-ish, not a snap
+
+    /** Turn smoothly toward a yaw/pitch, capped per tick so the camera glides. */
+    private static void aim(net.minecraft.client.player.LocalPlayer p, float yaw, float pitch) {
+        float dyaw = Mth.clamp(Mth.wrapDegrees(yaw - p.getYRot()), -TURN_SPEED, TURN_SPEED);
+        float dpitch = Mth.clamp(pitch - p.getXRot(), -TURN_SPEED, TURN_SPEED);
+        p.setYRot(p.getYRot() + dyaw);
+        p.setXRot(Mth.clamp(p.getXRot() + dpitch, -90f, 90f));
+    }
+
+    /** Aim smoothly at a world point (block center). */
+    private static void aimAt(net.minecraft.client.player.LocalPlayer p, Vec3 t) {
+        Vec3 eye = p.getEyePosition();
+        double d0 = t.x - eye.x;
+        double d1 = t.y - eye.y;
+        double d2 = t.z - eye.z;
+        double dxz = Math.sqrt(d0 * d0 + d2 * d2);
+        float yaw = (float) (Math.toDegrees(Math.atan2(d2, d0)) - 90.0);
+        float pitch = (float) (-Math.toDegrees(Math.atan2(d1, dxz)));
+        aim(p, yaw, pitch);
+    }
+
+    private static boolean lookingAt(Minecraft mc, BlockPos pos) {
+        return mc.hitResult instanceof BlockHitResult bhr && bhr.getBlockPos().equals(pos);
+    }
+
+    private static Vec3 center(BlockPos p) {
+        return new Vec3(p.getX() + 0.5, p.getY() + 0.5, p.getZ() + 0.5);
     }
 
     /** @return true while eating (caller should pause). */
@@ -246,6 +305,12 @@ public final class Autopilot {
 
     private static boolean isLava(Minecraft mc, BlockPos pos) {
         return mc.level.getBlockState(pos).is(Blocks.LAVA);
+    }
+
+    /** Lava or water — both are "do not enter". */
+    private static boolean hazard(Minecraft mc, BlockPos pos) {
+        BlockState st = mc.level.getBlockState(pos);
+        return st.is(Blocks.LAVA) || st.is(Blocks.WATER);
     }
 
     private static TargetScanner.Base richest(List<TargetScanner.Base> bases) {
