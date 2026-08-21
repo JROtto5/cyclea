@@ -351,7 +351,7 @@ public final class Autopilot {
         }
         if (oreGoal == null && CycleaConfig.get().oreSeekLevel > 0 && ++oreScanTick >= 8) {
             oreScanTick = 0;
-            oreGoal = findWantedOre(mc, player.blockPosition(), 6);
+            oreGoal = findWantedOre(mc, player.blockPosition(), 5);
             if (oreGoal != null) {
                 say(mc, "§b⛏ ore spotted — detouring to grab it");
             }
@@ -758,7 +758,11 @@ public final class Autopilot {
         return CycleaConfig.get().wantsOre(path);
     }
 
-    /** Nearest configured ore within radius r that's safe to dig, else null. */
+    /**
+     * Nearest configured ore that is actually EXPOSED (has an open face — visible
+     * in a cave wall or opening) within a small radius. No X-ray: fully-buried
+     * ores are ignored, so it only ever detours for ore it can really see.
+     */
     private static BlockPos findWantedOre(Minecraft mc, BlockPos c, int r) {
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
@@ -769,7 +773,8 @@ public final class Autopilot {
                     m.set(c.getX() + dx, c.getY() + dy, c.getZ() + dz);
                     String path = BuiltInRegistries.BLOCK.getKey(
                         mc.level.getBlockState(m).getBlock()).getPath();
-                    if (CycleaConfig.get().wantsOre(path) && !hasHazardNeighbor(mc, m)) {
+                    if (CycleaConfig.get().wantsOre(path)
+                        && isExposed(mc, m) && !hasHazardNeighbor(mc, m)) {
                         double d = dx * dx + dy * dy + dz * dz;
                         if (d < bestD) {
                             bestD = d;
@@ -780,6 +785,16 @@ public final class Autopilot {
             }
         }
         return best;
+    }
+
+    /** An ore is "visible" if at least one of its faces is open to air. */
+    private static boolean isExposed(Minecraft mc, BlockPos p) {
+        for (Direction d : Direction.values()) {
+            if (passable(mc, p.relative(d))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isShovelBlock(BlockState st) {
