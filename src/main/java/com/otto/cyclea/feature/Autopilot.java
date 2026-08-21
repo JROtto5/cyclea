@@ -498,8 +498,20 @@ public final class Autopilot {
         // grab any ore exposed right next to us first
         BlockPos target = adjacentOre(mc, feet);
 
+        // if we've sunk below the target depth (e.g. wedged at Y-60 in the bedrock
+        // layer), climb back up to Y-59 — mine the block above head and hop up.
+        if (target == null && feet.getY() < targetY) {
+            BlockPos up = feet.above(2);
+            if (canMine(mc, up)) {
+                target = up;
+            } else if (passable(mc, up)) {
+                jumpTicks = 3;
+            }
+        }
+
         // chasing an ore that's above/below? dig a 3D staircase toward it (mine up
-        // and hop, or dig down) so ore at any height is actually reachable.
+        // and hop, or dig down) so ore at any height is actually reachable —
+        // but never dig below Y-59 (that's the bedrock zone).
         if (target == null && oreGoal != null) {
             int dy = oreGoal.getY() - feet.getY();
             if (dy >= 1) {
@@ -509,7 +521,7 @@ public final class Autopilot {
                 } else if (passable(mc, up)) {
                     jumpTicks = 3;             // already clear → hop up toward it
                 }
-            } else if (dy <= -1) {
+            } else if (dy <= -1 && feet.getY() > targetY) {
                 BlockPos down = feet.below();
                 if (canMine(mc, down)) {
                     target = down;
