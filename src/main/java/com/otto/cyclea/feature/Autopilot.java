@@ -66,6 +66,8 @@ public final class Autopilot {
     private int fightCd = 0;              // attack cooldown ticks
     private BlockPos oreGoal = null;      // an ore we're detouring to dig out
     private int oreScanTick = 0;
+    private int oreGoalTicks = 0;         // how long we've chased the current ore
+    private final java.util.HashSet<Long> oreBlacklist = new java.util.HashSet<>();
     private final java.util.ArrayDeque<BlockPos> placedTrapdoors = new java.util.ArrayDeque<>();
     private double lastProgX = Double.NaN;   // anti-stuck progress tracking
     private double lastProgZ = Double.NaN;
@@ -304,7 +306,10 @@ public final class Autopilot {
         }
         if (stuckTicks == 60) {           // ~3s no progress → shake it loose
             mining = null;
-            oreGoal = null;
+            if (oreGoal != null) {
+                oreBlacklist.add(oreGoal.asLong());   // this ore caused the jam — skip it for good
+                oreGoal = null;
+            }
             detourTicks = 0;
             jumpTicks = 8;
         }
@@ -346,15 +351,26 @@ public final class Autopilot {
             stop(mc, "reached spawn area");
             return;
         }
-        // ore-seek: detour to dig out configured ores, clearing the whole vein
-        if (oreGoal != null && !wantedOre(mc, oreGoal)) {
-            // seed ore mined — keep going if the vein continues nearby
-            oreGoal = findWantedOre(mc, player.blockPosition(), 4);
+        // ore-seek: detour to dig out configured ores, but NEVER get stuck on one —
+        // if it can't be reached in a few seconds, blacklist it and keep mining.
+        if (oreGoal != null) {
+            if (++oreGoalTicks > 80) {                 // ~4s chasing one ore = give up
+                oreBlacklist.add(oreGoal.asLong());
+                if (oreBlacklist.size() > 128) {
+                    oreBlacklist.clear();
+                }
+                oreGoal = null;
+                say(mc, "§7ore unreachable — back to mining");
+            } else if (!wantedOre(mc, oreGoal)) {
+                oreGoal = findWantedOre(mc, player.blockPosition(), 4);   // vein continues?
+                oreGoalTicks = 0;
+            }
         }
         if (oreGoal == null && CycleaConfig.get().oreSeekLevel > 0 && ++oreScanTick >= 8) {
             oreScanTick = 0;
             oreGoal = findWantedOre(mc, player.blockPosition(), 5);
             if (oreGoal != null) {
+                oreGoalTicks = 0;
                 say(mc, "§b⛏ ore spotted — detouring to grab it");
             }
         }
@@ -861,7 +877,7 @@ public final class Autopilot {
      * in a cave wall or opening) within a small radius. No X-ray: fully-buried
      * ores are ignored, so it only ever detours for ore it can really see.
      */
-    private static BlockPos findWantedOre(Minecraft mc, BlockPos c, int r) {
+    private BlockPos findWantedOre(Minecraft mc, BlockPos c, int r) {
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
         BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
@@ -869,6 +885,9 @@ public final class Autopilot {
             for (int dy = -r; dy <= r; dy++) {
                 for (int dz = -r; dz <= r; dz++) {
                     m.set(c.getX() + dx, c.getY() + dy, c.getZ() + dz);
+                    if (oreBlacklist.contains(m.asLong())) {
+                        continue;   // gave up on this one already
+                    }
                     String path = BuiltInRegistries.BLOCK.getKey(
                         mc.level.getBlockState(m).getBlock()).getPath();
                     if (CycleaConfig.get().wantsOre(path)
