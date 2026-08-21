@@ -5,6 +5,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
@@ -32,79 +35,73 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The finder brain. Reads loaded block entities (cheap, covers the whole render
- * distance) and turns them into targets.
- *
- * The star feature is BASES — a "cluster bomb": every container and workstation
- * a player builds (chests, barrels, furnaces, hoppers, brewing stands, beacons,
- * signs, lecterns, and so on) is a block entity, so a tight concentration of
- * them is almost always a base. We gather that whole signature set and flood-
- * fill it into clusters; each dense cluster is a base.
+ * The finder brain. Reads loaded block entities (cheap, whole render distance),
+ * clusters the base fingerprint into bases, counts loot, and sweeps entities for
+ * players and hostiles.
  */
 public final class TargetScanner {
 
     private TargetScanner() {
     }
 
-    /** Result of a scan: the target hits plus the tallies the HUD shows. */
-    public record Scan(List<BlockPos> hits, int chests, int shulkers, int bases) {
+    /** A detected base: where it is and how many signature blocks it holds. */
+    public record Cluster(BlockPos center, int size) {
+    }
+
+    public record Scan(List<BlockPos> hits, List<Cluster> baseClusters,
+                       int chests, int shulkers, int beacons,
+                       int players, int hostiles) {
     }
 
     public static Scan scan(Minecraft mc) {
         ClientLevel level = mc.level;
         if (level == null || mc.player == null) {
-            return new Scan(List.of(), 0, 0, 0);
+            return new Scan(List.of(), List.of(), 0, 0, 0, 0, 0);
         }
         CycleaState state = CycleaState.get();
-
+        int maxY = state.getDeepMaxY();
         List<BlockEntity> loaded = loadedBlockEntities(mc, level);
 
-        // tallies (independent of the active target, for the HUD)
         int chests = 0;
         int shulkers = 0;
+        int beacons = 0;
         List<BlockPos> signatures = new ArrayList<>();
         for (BlockEntity be : loaded) {
             if (be instanceof ShulkerBoxBlockEntity) {
                 shulkers++;
             }
+            if (be instanceof BeaconBlockEntity) {
+                beacons++;
+            }
             if ((be instanceof ChestBlockEntity || be instanceof BarrelBlockEntity
-                || be instanceof EnderChestBlockEntity) && be.getBlockPos().getY() <= CycleaState.DEEP_MAX_Y) {
+                || be instanceof EnderChestBlockEntity) && be.getBlockPos().getY() <= maxY) {
                 chests++;
             }
             if (isBaseSignature(be)) {
                 signatures.add(be.getBlockPos());
             }
         }
-        List<BlockPos> baseCenters = clumps(signatures, 10, 4);
+        List<Cluster> clusters = clumpsDetailed(signatures, 10, 4);
+
+        int[] entityCounts = countEntities(mc, level);
 
         List<BlockPos> hits = switch (state.getTarget()) {
-            case BASES -> baseCenters;
-            case LOOT -> {
+            case BASES -> {
                 List<BlockPos> out = new ArrayList<>();
-                for (BlockEntity be : loaded) {
-                    if (be instanceof ShulkerBoxBlockEntity) {
-                        out.add(be.getBlockPos());
-                    } else if ((be instanceof ChestBlockEntity || be instanceof BarrelBlockEntity
-                        || be instanceof EnderChestBlockEntity)
-                        && be.getBlockPos().getY() <= CycleaState.DEEP_MAX_Y) {
-                        out.add(be.getBlockPos());
-                    }
+                for (Cluster c : clusters) {
+                    out.add(c.center());
                 }
                 yield out;
             }
-            case SHULKERS -> {
-                List<BlockPos> out = new ArrayList<>();
-                for (BlockEntity be : loaded) {
-                    if (be instanceof ShulkerBoxBlockEntity) {
-                        out.add(be.getBlockPos());
-                    }
-                }
-                yield out;
-            }
+            case LOOT -> collect(loaded, be ->
+                be instanceof ShulkerBoxBlockEntity
+                    || ((be instanceof ChestBlockEntity || be instanceof BarrelBlockEntity
+                    || be instanceof EnderChestBlockEntity) && be.getBlockPos().getY() <= maxY));
+            case SHULKERS -> collect(loaded, be -> be instanceof ShulkerBoxBlockEntity);
             case SPAWNERS -> {
                 List<BlockPos> out = new ArrayList<>();
                 for (BlockEntity be : loaded) {
-                    if (be.getBlockPos().getY() > CycleaState.DEEP_MAX_Y) {
+                    if (be.getBlockPos().getY() > maxY) {
                         continue;
                     }
                     BlockState s = level.getBlockState(be.getBlockPos());
@@ -117,7 +114,39 @@ public final class TargetScanner {
             case CAVES -> scanCaves(mc, level, state.getRadius());
         };
 
-        return new Scan(hits, chests, shulkers, baseCenters.size());
+        return new Scan(hits, clusters, chests, shulkers, beacons,
+            entityCounts[0], entityCounts[1]);
+    }
+
+    private interface BePredicate {
+        boolean test(BlockEntity be);
+    }
+
+    private static List<BlockPos> collect(List<BlockEntity> loaded, BePredicate p) {
+        List<BlockPos> out = new ArrayList<>();
+        for (BlockEntity be : loaded) {
+            if (p.test(be)) {
+                out.add(be.getBlockPos());
+            }
+        }
+        return out;
+    }
+
+    /** {players (excluding self), hostiles} within loaded entities. */
+    private static int[] countEntities(Minecraft mc, ClientLevel level) {
+        int players = 0;
+        int hostiles = 0;
+        for (Entity e : level.entitiesForRendering()) {
+            if (e == mc.player) {
+                continue;
+            }
+            if (e instanceof Player) {
+                players++;
+            } else if (e instanceof Monster) {
+                hostiles++;
+            }
+        }
+        return new int[]{players, hostiles};
     }
 
     /** Any container or workstation a player places — the base fingerprint. */
@@ -164,7 +193,6 @@ public final class TargetScanner {
         return dedupeNearby(hits, 12);
     }
 
-    /** Every block entity in the currently loaded chunks around the player. */
     private static List<BlockEntity> loadedBlockEntities(Minecraft mc, ClientLevel level) {
         List<BlockEntity> out = new ArrayList<>();
         ClientChunkCache cache = level.getChunkSource();
@@ -183,13 +211,9 @@ public final class TargetScanner {
         return out;
     }
 
-    /**
-     * Flood-fills nearby positions into clusters; returns the first member of
-     * every cluster of at least {@code minSize}. Used both for base detection
-     * and for the "clump" alert.
-     */
-    public static List<BlockPos> clumps(List<BlockPos> pts, int reach, int minSize) {
-        List<BlockPos> centers = new ArrayList<>();
+    /** Flood-fill positions into clusters, returning center + member count each. */
+    public static List<Cluster> clumpsDetailed(List<BlockPos> pts, int reach, int minSize) {
+        List<Cluster> clusters = new ArrayList<>();
         boolean[] used = new boolean[pts.size()];
         for (int i = 0; i < pts.size(); i++) {
             if (used[i]) {
@@ -208,8 +232,17 @@ public final class TargetScanner {
                 }
             }
             if (group.size() >= minSize) {
-                centers.add(pts.get(group.get(0)));
+                clusters.add(new Cluster(pts.get(group.get(0)), group.size()));
             }
+        }
+        return clusters;
+    }
+
+    /** Simple center list for the clump alert (chests/shulkers). */
+    public static List<BlockPos> clumps(List<BlockPos> pts, int reach, int minSize) {
+        List<BlockPos> centers = new ArrayList<>();
+        for (Cluster c : clumpsDetailed(pts, reach, minSize)) {
+            centers.add(c.center());
         }
         return centers;
     }

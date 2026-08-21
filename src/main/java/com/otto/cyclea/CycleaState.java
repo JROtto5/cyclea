@@ -3,12 +3,14 @@ package com.otto.cyclea;
 import net.minecraft.core.BlockPos;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
- * Shared runtime state for Cyclea. Holds the on/off switch, the active target,
- * the latest located positions, and the live tallies the HUD reads (chests,
- * shulkers, and detected bases).
+ * Shared runtime state for Cyclea. Holds the switches, the active target, the
+ * latest located positions, and every tally / snapshot the HUD reads. Written
+ * from the client tick, read from the HUD — fields the HUD touches are volatile.
  */
 public final class CycleaState {
     private static final CycleaState INSTANCE = new CycleaState();
@@ -17,15 +19,11 @@ public final class CycleaState {
         return INSTANCE;
     }
 
-    /** Chests, spawners and vaults are only reported at or below this Y (deep loot). */
-    public static final int DEEP_MAX_Y = 20;
-
-    /** The kinds of things Cyclea can hunt for. Cycle through them with the key. */
     public enum Target {
         BASES("Bases (cluster bomb)", 0xFF3860),
-        LOOT("Loot: chests≤Y20 + shulkers", 0x00E5FF),
+        LOOT("Loot: chests + shulkers", 0x00E5FF),
         SHULKERS("Shulkers (all levels)", 0xD070FF),
-        SPAWNERS("Spawners & Vaults (≤Y20)", 0xFFB300),
+        SPAWNERS("Spawners & Vaults", 0xFFB300),
         CAVES("Caves", 0x8CFF66);
 
         public final String label;
@@ -42,15 +40,30 @@ public final class CycleaState {
     }
 
     private boolean active = false;
+    private boolean compactHud = false;
     private Target target = Target.BASES;
     private int radius = 48;
+    private int deepMaxY = 20;                 // adjustable Y filter (#10)
     private final List<BlockPos> found = new ArrayList<>();
 
-    // live tallies for the HUD (updated every scan, regardless of active target)
+    // cumulative unique bases discovered this session (#6), keyed by 16-block grid
+    private final Set<Long> seenBaseKeys = new LinkedHashSet<>();
+    private final List<BlockPos> sessionBases = new ArrayList<>();
+
+    // HUD snapshot (#1–#14)
     private volatile int chestCount = 0;
     private volatile int shulkerCount = 0;
     private volatile int baseCount = 0;
+    private volatile int beaconCount = 0;
+    private volatile int playerCount = 0;
+    private volatile int hostileCount = 0;
+    private volatile int richestSize = 0;
+    private volatile int nearestLootCount = 0;
+    private volatile int nearestDist = -1;
     private volatile String nearestLine = "";
+    private volatile String vertical = "";
+    private volatile String bearing = "";
+    private volatile List<int[]> blips = List.of();   // {dx, dz} relative to player
 
     private CycleaState() {
     }
@@ -62,6 +75,14 @@ public final class CycleaState {
     public boolean toggle() {
         active = !active;
         return active;
+    }
+
+    public boolean isCompact() {
+        return compactHud;
+    }
+
+    public void toggleCompact() {
+        compactHud = !compactHud;
     }
 
     public Target getTarget() {
@@ -78,6 +99,14 @@ public final class CycleaState {
         return radius;
     }
 
+    public int getDeepMaxY() {
+        return deepMaxY;
+    }
+
+    public void adjustDeepMaxY(int delta) {
+        deepMaxY = Math.max(-64, Math.min(320, deepMaxY + delta));
+    }
+
     public synchronized List<BlockPos> getFound() {
         return new ArrayList<>(found);
     }
@@ -87,6 +116,29 @@ public final class CycleaState {
         found.addAll(positions);
     }
 
+    /** Record base positions into the cumulative session log; returns how many were new. */
+    public synchronized int recordBases(List<BlockPos> bases) {
+        int fresh = 0;
+        for (BlockPos b : bases) {
+            long key = (((long) (b.getX() >> 4)) & 0x3FFFFFFL) << 34
+                | (((long) (b.getZ() >> 4)) & 0x3FFFFFFL);
+            if (seenBaseKeys.add(key)) {
+                sessionBases.add(b);
+                fresh++;
+            }
+        }
+        return fresh;
+    }
+
+    public synchronized List<BlockPos> getSessionBases() {
+        return new ArrayList<>(sessionBases);
+    }
+
+    public int getSessionBaseTotal() {
+        return sessionBases.size();
+    }
+
+    // getters/setter for the HUD snapshot
     public int getChestCount() {
         return chestCount;
     }
@@ -99,14 +151,62 @@ public final class CycleaState {
         return baseCount;
     }
 
+    public int getBeaconCount() {
+        return beaconCount;
+    }
+
+    public int getPlayerCount() {
+        return playerCount;
+    }
+
+    public int getHostileCount() {
+        return hostileCount;
+    }
+
+    public int getRichestSize() {
+        return richestSize;
+    }
+
+    public int getNearestLootCount() {
+        return nearestLootCount;
+    }
+
+    public int getNearestDist() {
+        return nearestDist;
+    }
+
     public String getNearestLine() {
         return nearestLine;
     }
 
-    public void setTallies(int chests, int shulkers, int bases, String nearest) {
+    public String getVertical() {
+        return vertical;
+    }
+
+    public String getBearing() {
+        return bearing;
+    }
+
+    public List<int[]> getBlips() {
+        return blips;
+    }
+
+    public void setSnapshot(int chests, int shulkers, int bases, int beacons,
+                            int players, int hostiles, int richest, int nearestLoot,
+                            int nearestDistance, String nearest, String vert,
+                            String bear, List<int[]> radarBlips) {
         this.chestCount = chests;
         this.shulkerCount = shulkers;
         this.baseCount = bases;
+        this.beaconCount = beacons;
+        this.playerCount = players;
+        this.hostileCount = hostiles;
+        this.richestSize = richest;
+        this.nearestLootCount = nearestLoot;
+        this.nearestDist = nearestDistance;
         this.nearestLine = nearest;
+        this.vertical = vert;
+        this.bearing = bear;
+        this.blips = radarBlips;
     }
 }
