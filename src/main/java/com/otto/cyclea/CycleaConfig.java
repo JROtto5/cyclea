@@ -36,20 +36,15 @@ public final class CycleaConfig {
     // 0 = fast (every tick), 1 = normal (every 2), 2 = slow (every 3) — pace vs the server
     public int paceLevel = 1;
 
-    /** Act only every N ticks — slows the bot so it doesn't outrun a laggy server. */
+    /** Act every N ticks. Default is full speed (every tick); only "Slow" eases off. */
     public int actEveryNTicks() {
-        return switch (paceLevel) {
-            case 0 -> 1;
-            case 2 -> 3;
-            default -> 2;
-        };
+        return paceLevel == 2 ? 2 : 1;
     }
 
     public String paceLabel() {
         return switch (paceLevel) {
-            case 0 -> "Fast";
-            case 2 -> "Slow (gentle on server)";
-            default -> "Normal";
+            case 2 -> "Slow (server-friendly)";
+            default -> "Full speed";
         };
     }
 

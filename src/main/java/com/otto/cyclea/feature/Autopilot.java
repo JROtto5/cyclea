@@ -285,6 +285,10 @@ public final class Autopilot {
         return "other";
     }
 
+    private float botYaw = Float.NaN;   // rotation the bot set last tick (to detect YOUR mouse input)
+    private float botPitch = 0;
+    private int manualPauseTicks = 0;
+
     /** Called every client tick. Fully guarded — any trouble halts safely. */
     public void tick(Minecraft mc) {
         if (!active || mc.player == null || mc.level == null) {
@@ -295,6 +299,11 @@ public final class Autopilot {
         } catch (Throwable t) {
             stop(mc, "internal error (safe halt)");
         }
+        // remember where the bot left the camera, so next tick we can tell if YOU moved it
+        if (active && mc.player != null && manualPauseTicks == 0) {
+            botYaw = mc.player.getYRot();
+            botPitch = mc.player.getXRot();
+        }
     }
 
     private int paceCounter = 0;
@@ -302,8 +311,21 @@ public final class Autopilot {
     private void step(Minecraft mc) {
         var player = mc.player;
 
-        // pace vs the server: on "off" ticks, hold still (don't advance) so the bot
-        // never outruns a laggy server. Mining progress (breakingPos) is preserved.
+        // CRUISE-CONTROL YIELD: the instant you move the mouse, hand full control
+        // back to you (release everything) and stay out of the way; resume shortly
+        // after you stop. This is what lets you mine/aim yourself while it's on.
+        if (!Float.isNaN(botYaw)
+            && (Math.abs(Mth.degreesDifference(player.getYRot(), botYaw)) > 3f
+            || Math.abs(player.getXRot() - botPitch) > 3f)) {
+            manualPauseTicks = 30;
+        }
+        if (manualPauseTicks > 0) {
+            manualPauseTicks--;
+            releaseAll(mc);
+            return;
+        }
+
+        // pace vs the server: on "off" ticks, hold still (don't advance).
         if (++paceCounter < CycleaConfig.get().actEveryNTicks()) {
             key(mc, mc.options.keyUp, false);
             key(mc, mc.options.keySprint, false);
