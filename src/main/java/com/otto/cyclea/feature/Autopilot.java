@@ -490,8 +490,9 @@ public final class Autopilot {
                 stop(mc, "§edrop ahead, no blocks to bridge — need you");
                 return;
             }
-            // 1×1 trapdoor lane: place a trapdoor ceiling ahead, and MINE BACK the
-            // one left behind so a couple of trapdoors leapfrog forward forever.
+            // 1×1 trapdoor lane: place a trapdoor at head level just behind (an open
+            // spot in the dug tunnel), and MINE BACK the older one so a couple of
+            // trapdoors leapfrog along the tunnel and are never consumed.
             if (CycleaConfig.get().oneByOne) {
                 BlockPos old = placedTrapdoors.peekFirst();
                 if (old != null && !isTrapdoor(mc.level.getBlockState(old))) {
@@ -503,9 +504,9 @@ public final class Autopilot {
                     key(mc, mc.options.keyAttack, lookingAt(mc, old));
                     return;   // breaking it to pick the trapdoor back up
                 }
-                if (mc.level.getBlockState(feet.above(2)).isAir()
-                    && place(mc, feet.above(2), "trapdoor")) {
-                    placedTrapdoors.addLast(feet.above(2).immutable());
+                BlockPos spot = feet.above().relative(dir.getOpposite());   // head-level, behind (air)
+                if (mc.level.getBlockState(spot).isAir() && place(mc, spot, "trapdoor")) {
+                    placedTrapdoors.addLast(spot.immutable());
                 }
             }
             // walk (and sprint) while pointed down the tunnel — tighter tolerance = straighter
