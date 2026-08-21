@@ -5,5 +5,6 @@
   "key.cyclea.compact": "Compact HUD",
   "key.cyclea.pin": "Pin Bases to Minimap",
   "key.cyclea.autopilot": "Autopilot (toward spawn)",
-  "key.cyclea.searchmode": "Search Mode (sweep/spawn)"
+  "key.cyclea.searchmode": "Search Mode (sweep/spawn)",
+  "key.cyclea.config": "Open Config"
 }

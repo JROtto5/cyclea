@@ -1,5 +1,6 @@
 package com.otto.cyclea.feature;
 
+import com.otto.cyclea.CycleaConfig;
 import com.otto.cyclea.CycleaState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
@@ -56,6 +57,8 @@ public final class Autopilot {
     private float glancePitch = 0;
     private Direction detourDir = null;   // committed detour while routing around lava
     private int detourTicks = 0;
+    private List<BlockPos> path = null;   // A* route to the base we're approaching
+    private int pathIndex = 0;
 
     // search strategy
     public enum SearchMode { SWEEP, SPAWN }
@@ -105,8 +108,9 @@ public final class Autopilot {
     }
 
     private void nextSpiralTarget() {
-        targetX = spiralCornerX + DIRS[dirIdx][0] * legLen * SWEEP_STEP;
-        targetZ = spiralCornerZ + DIRS[dirIdx][1] * legLen * SWEEP_STEP;
+        int step = CycleaConfig.get().sweepStep;
+        targetX = spiralCornerX + DIRS[dirIdx][0] * legLen * step;
+        targetZ = spiralCornerZ + DIRS[dirIdx][1] * legLen * step;
     }
 
     private void advanceSpiral() {
@@ -201,15 +205,27 @@ public final class Autopilot {
             if (!scan.bases().isEmpty()) {
                 TargetScanner.Base best = richest(scan.bases());
                 MinimapBridge.pushBases(scan.bases());
-                targetX = best.center().getX();
-                targetZ = best.center().getZ();
+                // A* a real route to the base; fall back to dig-toward if none found
+                path = Pathfinder.find(mc, mc.player.blockPosition(), best.center());
+                pathIndex = 0;
+                if (path != null && !path.isEmpty()) {
+                    targetX = path.get(0).getX();
+                    targetZ = path.get(0).getZ();
+                } else {
+                    targetX = best.center().getX();
+                    targetZ = best.center().getZ();
+                }
                 approaching = true;
                 newLeg(mc);
                 mc.player.playSound(net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 1.4f);
                 say(mc, "§a★ BASE FOUND §f" + best.chests() + " chests, " + best.shulkers()
                     + " shulkers §7at §f" + best.center().getX() + "," + best.center().getY()
                     + "," + best.center().getZ() + " §7— " + lootRating(best)
-                    + " §e→ navigating there…");
+                    + (path != null ? " §e→ pathing there (" + path.size() + " steps)…"
+                        : " §e→ heading there…"));
+                if (!best.loot().isEmpty()) {
+                    say(mc, "§7   loot: §f" + best.loot());
+                }
             }
         }
 
@@ -229,7 +245,17 @@ public final class Autopilot {
         double dz = targetZ - player.getZ();
         if (Math.abs(dx) < 3 && Math.abs(dz) < 3) {
             if (approaching) {
+                // following an A* path? advance to the next node instead of stopping
+                if (path != null && pathIndex < path.size() - 1) {
+                    pathIndex++;
+                    BlockPos n = path.get(pathIndex);
+                    targetX = n.getX();
+                    targetZ = n.getZ();
+                    newLeg(mc);
+                    return;
+                }
                 approaching = false;
+                path = null;
                 stop(mc, "§a✔ arrived at base — §fyour turn (press O to resume the sweep)");
                 return;
             }
@@ -312,16 +338,20 @@ public final class Autopilot {
             // path clear: walk, glancing around like a person scanning the tunnel
             key(mc, mc.options.keyAttack, false);
             mc.gameMode.stopDestroyBlock();
-            if (--glanceTimer <= 0) {
-                // occasional big flick, otherwise a normal look-around
-                boolean flick = rng.nextFloat() < 0.35f;
-                float amp = flick ? 60f : 34f;
-                glanceYaw = (rng.nextFloat() - 0.5f) * amp;          // ±17° normal, ±30° flick
-                glancePitch = (rng.nextFloat() - 0.5f) * (flick ? 34f : 22f);
-                glanceTimer = flick ? 6 + rng.nextInt(10) : 12 + rng.nextInt(30);
+            float yawAmp = CycleaConfig.get().glanceYawAmp();
+            float pitchAmp = CycleaConfig.get().glancePitchAmp();
+            if (yawAmp <= 0f) {
+                aim(player, travelYaw, 0f);   // look-around disabled in config
+            } else {
+                if (--glanceTimer <= 0) {
+                    boolean flick = rng.nextFloat() < 0.35f;
+                    glanceYaw = (rng.nextFloat() - 0.5f) * (flick ? yawAmp * 1.7f : yawAmp);
+                    glancePitch = (rng.nextFloat() - 0.5f) * (flick ? pitchAmp * 1.5f : pitchAmp);
+                    glanceTimer = flick ? 6 + rng.nextInt(10) : 12 + rng.nextInt(30);
+                }
+                float flickSpeed = Math.abs(glanceYaw) > 22f ? 16f : CycleaConfig.get().turnMax();
+                aim(player, travelYaw + glanceYaw, glancePitch, flickSpeed);
             }
-            float flickSpeed = Math.abs(glanceYaw) > 22f ? 16f : TURN_MAX;   // snap faster on big flicks
-            aim(player, travelYaw + glanceYaw, glancePitch, flickSpeed);
             if (passable(mc, aheadFeet.below()) && passable(mc, aheadFeet.below().below())) {
                 stop(mc, "§edrop ahead (avoiding a fall)");
                 return;
@@ -424,17 +454,18 @@ public final class Autopilot {
      * capped per tick, with a deadzone so it stops dead instead of shimmering.
      */
     private void aim(net.minecraft.client.player.LocalPlayer p, float yaw, float pitch) {
-        aim(p, yaw, pitch, TURN_MAX);
+        aim(p, yaw, pitch, CycleaConfig.get().turnMax());
     }
 
     private void aim(net.minecraft.client.player.LocalPlayer p, float yaw, float pitch, float maxSpeed) {
+        float ease = CycleaConfig.get().turnEase();
         // fold the human drift into the goal so we ease toward a subtly-moving point
         float goalYaw = yaw + (float) driftYaw;
         float goalPitch = pitch + (float) driftPitch;
         float dyaw = Mth.wrapDegrees(goalYaw - p.getYRot());
         float dpitch = goalPitch - p.getXRot();
-        float sy = Math.abs(dyaw) < TURN_DEAD ? dyaw : Mth.clamp(dyaw * TURN_EASE, -maxSpeed, maxSpeed);
-        float sp = Math.abs(dpitch) < TURN_DEAD ? dpitch : Mth.clamp(dpitch * TURN_EASE, -maxSpeed, maxSpeed);
+        float sy = Math.abs(dyaw) < TURN_DEAD ? dyaw : Mth.clamp(dyaw * ease, -maxSpeed, maxSpeed);
+        float sp = Math.abs(dpitch) < TURN_DEAD ? dpitch : Mth.clamp(dpitch * ease, -maxSpeed, maxSpeed);
         p.setYRot(p.getYRot() + sy);
         p.setXRot(Mth.clamp(p.getXRot() + sp, -90f, 90f));
     }

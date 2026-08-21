@@ -5,9 +5,11 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.Container;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -34,8 +36,9 @@ public final class TargetScanner {
     private TargetScanner() {
     }
 
-    /** A detected base: where it is, and how much storage it has. */
-    public record Base(BlockPos center, int chests, int shulkers) {
+    /** A detected base: where it is, how much storage it has, and (single-player
+     *  only) a peek at the notable contents. On servers {@code loot} is empty. */
+    public record Base(BlockPos center, int chests, int shulkers, String loot) {
         public int total() {
             return chests + shulkers;
         }
@@ -48,7 +51,7 @@ public final class TargetScanner {
     /** Chests only count when this deep; shulkers count at any height. */
     public static final int CHEST_MAX_Y = 20;
 
-    private record Container(BlockPos pos, boolean shulker) {
+    private record ContainerHit(BlockPos pos, boolean shulker, BlockEntity be) {
     }
 
     public static Scan scan(Minecraft mc) {
@@ -59,7 +62,7 @@ public final class TargetScanner {
         CycleaState state = CycleaState.get();
         List<BlockEntity> loaded = loadedBlockEntities(mc, level);
 
-        List<Container> containers = new ArrayList<>();
+        List<ContainerHit> containers = new ArrayList<>();
         int chestsTotal = 0;
         int shulkersTotal = 0;
         for (BlockEntity be : loaded) {
@@ -75,7 +78,7 @@ public final class TargetScanner {
                 chestsTotal++;
             }
             if (shulker || chest) {
-                containers.add(new Container(be.getBlockPos(), shulker));
+                containers.add(new ContainerHit(be.getBlockPos(), shulker, be));
             }
         }
 
@@ -93,7 +96,7 @@ public final class TargetScanner {
             }
             case CONTAINERS -> {
                 List<BlockPos> out = new ArrayList<>();
-                for (Container c : containers) {
+                for (ContainerHit c : containers) {
                     out.add(c.pos());
                 }
                 yield out;
@@ -114,9 +117,18 @@ public final class TargetScanner {
         return new Scan(hits, bases, chestsTotal, shulkersTotal, entities[0], entities[1]);
     }
 
-    /** Flood-fill nearby containers into bases; count chests/shulkers in each. */
-    private static List<Base> detectBases(List<Container> pts, int reach, int minSize) {
+    /**
+     * Flood-fill nearby containers into bases. Uses a spatial hash grid (cell =
+     * reach) so each container only compares against its ~27 neighbour cells —
+     * near-linear instead of O(n²), so a container-dense world never lags.
+     */
+    private static List<Base> detectBases(List<ContainerHit> pts, int reach, int minSize) {
         List<Base> bases = new ArrayList<>();
+        // bucket container indices into grid cells of size `reach`
+        java.util.Map<Long, List<Integer>> grid = new java.util.HashMap<>();
+        for (int i = 0; i < pts.size(); i++) {
+            grid.computeIfAbsent(cell(pts.get(i).pos(), reach), k -> new ArrayList<>()).add(i);
+        }
         boolean[] used = new boolean[pts.size()];
         for (int i = 0; i < pts.size(); i++) {
             if (used[i]) {
@@ -127,10 +139,23 @@ public final class TargetScanner {
             used[i] = true;
             for (int g = 0; g < group.size(); g++) {
                 BlockPos a = pts.get(group.get(g)).pos();
-                for (int j = 0; j < pts.size(); j++) {
-                    if (!used[j] && a.distManhattan(pts.get(j).pos()) <= reach) {
-                        used[j] = true;
-                        group.add(j);
+                int cx = Math.floorDiv(a.getX(), reach);
+                int cy = Math.floorDiv(a.getY(), reach);
+                int cz = Math.floorDiv(a.getZ(), reach);
+                for (int ox = -1; ox <= 1; ox++) {
+                    for (int oy = -1; oy <= 1; oy++) {
+                        for (int oz = -1; oz <= 1; oz++) {
+                            List<Integer> cellList = grid.get(packCell(cx + ox, cy + oy, cz + oz));
+                            if (cellList == null) {
+                                continue;
+                            }
+                            for (int j : cellList) {
+                                if (!used[j] && a.distManhattan(pts.get(j).pos()) <= reach) {
+                                    used[j] = true;
+                                    group.add(j);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -143,7 +168,7 @@ public final class TargetScanner {
             long sy = 0;
             long sz = 0;
             for (int idx : group) {
-                Container c = pts.get(idx);
+                ContainerHit c = pts.get(idx);
                 if (c.shulker()) {
                     shulkers++;
                 } else {
@@ -165,9 +190,45 @@ public final class TargetScanner {
                     center = pts.get(idx).pos();
                 }
             }
-            bases.add(new Base(center, chests, shulkers));
+            bases.add(new Base(center, chests, shulkers, peekLoot(group, pts)));
         }
         return bases;
+    }
+
+    private static long cell(BlockPos p, int reach) {
+        return packCell(Math.floorDiv(p.getX(), reach), Math.floorDiv(p.getY(), reach),
+            Math.floorDiv(p.getZ(), reach));
+    }
+
+    private static long packCell(int cx, int cy, int cz) {
+        return ((long) (cx & 0x1FFFFF) << 42) | ((long) (cy & 0xFFFFF) << 22) | (cz & 0x3FFFFF);
+    }
+
+    /**
+     * Peek at container contents — only works in single-player (on a server the
+     * client never receives them). Returns a short "top items" summary, or "".
+     */
+    private static String peekLoot(List<Integer> group, List<ContainerHit> pts) {
+        java.util.Map<String, Integer> tally = new java.util.HashMap<>();
+        for (int idx : group) {
+            if (!(pts.get(idx).be() instanceof Container c)) {
+                continue;
+            }
+            for (int i = 0; i < c.getContainerSize(); i++) {
+                ItemStack s = c.getItem(i);
+                if (!s.isEmpty()) {
+                    tally.merge(s.getHoverName().getString(), s.getCount(), Integer::sum);
+                }
+            }
+        }
+        if (tally.isEmpty()) {
+            return "";
+        }
+        return tally.entrySet().stream()
+            .sorted((a, b) -> b.getValue() - a.getValue())
+            .limit(4)
+            .map(e -> e.getValue() + "× " + e.getKey())
+            .reduce((a, b) -> a + ", " + b).orElse("");
     }
 
     private static int[] countEntities(Minecraft mc, ClientLevel level) {

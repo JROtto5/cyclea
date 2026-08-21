@@ -1,5 +1,6 @@
 package com.otto.cyclea.client;
 
+import com.otto.cyclea.CycleaConfig;
 import com.otto.cyclea.CycleaState;
 import com.otto.cyclea.feature.Autopilot;
 import com.otto.cyclea.feature.MinimapBridge;
@@ -39,6 +40,7 @@ public class CycleaClient implements ClientModInitializer {
     private KeyMapping pinKey;
     private KeyMapping autopilotKey;
     private KeyMapping searchModeKey;
+    private KeyMapping configKey;
     private int tickCounter = 0;
     private List<TargetScanner.Base> lastBases = List.of();
 
@@ -50,7 +52,9 @@ public class CycleaClient implements ClientModInitializer {
         pinKey = reg("key.cyclea.pin", GLFW.GLFW_KEY_P);
         autopilotKey = reg("key.cyclea.autopilot", GLFW.GLFW_KEY_O);
         searchModeKey = reg("key.cyclea.searchmode", GLFW.GLFW_KEY_K);
+        configKey = reg("key.cyclea.config", GLFW.GLFW_KEY_J);
 
+        CycleaConfig.get().load();
         HudElementRegistry.addLast(
             Identifier.fromNamespaceAndPath("cyclea", "radar"), new CycleaHud());
         ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
@@ -125,6 +129,9 @@ public class CycleaClient implements ClientModInitializer {
             }
         }
 
+        while (configKey.consumeClick()) {
+            mc.setScreenAndShow(new CycleaConfigScreen());
+        }
         while (searchModeKey.consumeClick()) {
             String m = Autopilot.get().toggleSearchMode(mc);
             say(mc, "§6[Autopilot] §7search mode → §f" + m

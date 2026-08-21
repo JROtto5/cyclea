@@ -1,0 +1,169 @@
+package com.otto.cyclea.feature;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.PriorityQueue;
+
+/**
+ * A bounded A* over the loaded world. Nodes are "feet" positions the player can
+ * stand at; edges step to the 4 horizontal neighbours at the same Y or ±1 (step
+ * up / drop down). Blocks in the way can be mined (extra cost); lava, water, and
+ * blocks with a lava/water neighbour (flood risk) are never crossed.
+ *
+ * Not a full Baritone — it's node-budgeted and gives up (returns null) on big or
+ * impossible routes, at which point the autopilot falls back to dig-toward. But
+ * within loaded chunks it finds real paths around walls, gaps, and ravines.
+ */
+public final class Pathfinder {
+
+    private Pathfinder() {
+    }
+
+    private static final int MAX_NODES = 6000;
+
+    private record Node(BlockPos pos, double g, double f) {
+    }
+
+    /** @return a list of feet positions from near start to near goal, or null. */
+    public static List<BlockPos> find(Minecraft mc, BlockPos start, BlockPos goal) {
+        if (mc.level == null) {
+            return null;
+        }
+        BlockPos from = grounded(mc, start);
+        if (from == null) {
+            return null;
+        }
+        PriorityQueue<Node> open = new PriorityQueue<>((a, b) -> Double.compare(a.f, b.f));
+        Map<Long, Double> best = new HashMap<>();
+        Map<Long, BlockPos> came = new HashMap<>();
+
+        open.add(new Node(from, 0, h(from, goal)));
+        best.put(from.asLong(), 0.0);
+        int expanded = 0;
+
+        while (!open.isEmpty() && expanded++ < MAX_NODES) {
+            Node cur = open.poll();
+            if (horizClose(cur.pos, goal, 2) && Math.abs(cur.pos.getY() - goal.getY()) <= 3) {
+                return reconstruct(came, cur.pos);
+            }
+            for (Direction d : Direction.Plane.HORIZONTAL) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    BlockPos next = cur.pos.relative(d).above(dy);
+                    Double cost = stepCost(mc, cur.pos, next, d, dy);
+                    if (cost == null) {
+                        continue;
+                    }
+                    double ng = cur.g + cost;
+                    long key = next.asLong();
+                    if (ng < best.getOrDefault(key, Double.MAX_VALUE)) {
+                        best.put(key, ng);
+                        came.put(key, cur.pos);
+                        open.add(new Node(next, ng, ng + h(next, goal)));
+                    }
+                }
+            }
+        }
+        return null;   // no path within budget — caller falls back
+    }
+
+    /** Move cost from a to b (b = feet of the destination), or null if illegal. */
+    private static Double stepCost(Minecraft mc, BlockPos a, BlockPos b, Direction d, int dy) {
+        if (!standable(mc, b)) {
+            return null;
+        }
+        // must be able to occupy feet+head at b (mine if solid, never through hazards)
+        double mine = 0;
+        Double f = enterCost(mc, b);
+        Double h = enterCost(mc, b.above());
+        if (f == null || h == null) {
+            return null;
+        }
+        mine += f + h;
+        // stepping up requires clearing the block above the current head too
+        if (dy > 0) {
+            Double up = enterCost(mc, a.above(2));
+            if (up == null) {
+                return null;
+            }
+            mine += up;
+        }
+        return 1.0 + mine + (dy != 0 ? 0.5 : 0);
+    }
+
+    /** Cost to occupy a block (0 if already open, >0 if we must mine it), null if impossible. */
+    private static Double enterCost(Minecraft mc, BlockPos p) {
+        BlockState st = mc.level.getBlockState(p);
+        if (st.is(Blocks.LAVA) || st.is(Blocks.WATER)) {
+            return null;
+        }
+        if (passable(st)) {
+            return 0.0;
+        }
+        if (hasHazardNeighbor(mc, p)) {
+            return null;   // mining it would flood
+        }
+        return 2.0;        // solid but safe to mine
+    }
+
+    private static boolean standable(Minecraft mc, BlockPos feet) {
+        BlockState below = mc.level.getBlockState(feet.below());
+        return !passable(below) && !below.is(Blocks.LAVA) && !below.is(Blocks.WATER);
+    }
+
+    /** Drop the start position down to the first solid floor so A* begins grounded. */
+    private static BlockPos grounded(Minecraft mc, BlockPos p) {
+        for (int i = 0; i < 4; i++) {
+            if (standable(mc, p)) {
+                return p;
+            }
+            p = p.below();
+        }
+        return standable(mc, p) ? p : null;
+    }
+
+    private static boolean passable(BlockState st) {
+        return st.isAir() || st.is(Blocks.CAVE_AIR) || st.is(Blocks.VOID_AIR)
+            || st.is(Blocks.WATER) || st.is(Blocks.SHORT_GRASS) || st.is(Blocks.TALL_GRASS);
+    }
+
+    private static boolean hasHazardNeighbor(Minecraft mc, BlockPos pos) {
+        for (Direction d : Direction.values()) {
+            BlockState st = mc.level.getBlockState(pos.relative(d));
+            if (st.is(Blocks.LAVA) || st.is(Blocks.WATER)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean horizClose(BlockPos a, BlockPos b, int r) {
+        return Math.abs(a.getX() - b.getX()) <= r && Math.abs(a.getZ() - b.getZ()) <= r;
+    }
+
+    private static double h(BlockPos a, BlockPos b) {
+        double dx = a.getX() - b.getX();
+        double dz = a.getZ() - b.getZ();
+        double dy = a.getY() - b.getY();
+        return Math.sqrt(dx * dx + dz * dz) + Math.abs(dy) * 0.7;
+    }
+
+    private static List<BlockPos> reconstruct(Map<Long, BlockPos> came, BlockPos end) {
+        List<BlockPos> path = new ArrayList<>();
+        BlockPos c = end;
+        while (c != null) {
+            path.add(c);
+            c = came.get(c.asLong());
+        }
+        Collections.reverse(path);
+        return path;
+    }
+}
