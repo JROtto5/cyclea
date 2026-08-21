@@ -20,17 +20,25 @@ nearest one — a "mod-of-mods" companion that pairs with any minimap.
   Shulkers (all levels) → Spawners & Vaults (≤Y20) → Caves.
 - **Deep-loot filter:** chests/barrels/ender chests and spawners/vaults report only
   at **Y ≤ 20**. Shulkers are unfiltered (every level).
+- **Xaero minimap integration:** detected bases auto-pin as red waypoints on
+  your Xaero's Minimap / World Map (press `P` to pin the whole session). Soft
+  dependency — Cyclea runs fine without Xaero installed.
 - **Red clump alert:** bunched chests/shulkers (double chests, shulker walls,
   storage rooms) flash `⚠ CLUMP found!` in red so a stash stands out.
 
 ## Controls
 
+All in **Options → Controls → Cyclea** (unique keys, no clashes with Xaero or vanilla):
+
 | Key | Action |
 |-----|--------|
 | `[` | Toggle the finder on/off |
-| `]` | Cycle to the next target type |
+| `]` | Cycle target (Bases → Loot → Shulkers → Spawners → Caves) |
+| `-` | Lower the deep-loot Y cutoff by 8 |
+| `=` | Raise the deep-loot Y cutoff by 8 |
+| `\` | Compact / full HUD |
+| `P` | Pin detected bases to your Xaero minimap |
 
-Both are rebindable in **Options → Controls → Cyclea**.
 
 ## Building
 

@@ -37,6 +37,7 @@ public class CycleaClient implements ClientModInitializer {
     private KeyMapping yUpKey;
     private KeyMapping yDownKey;
     private KeyMapping compactKey;
+    private KeyMapping pinKey;
     private int tickCounter = 0;
 
     @Override
@@ -46,6 +47,7 @@ public class CycleaClient implements ClientModInitializer {
         yUpKey = reg("key.cyclea.yup", GLFW.GLFW_KEY_EQUAL);
         yDownKey = reg("key.cyclea.ydown", GLFW.GLFW_KEY_MINUS);
         compactKey = reg("key.cyclea.compact", GLFW.GLFW_KEY_BACKSLASH);
+        pinKey = reg("key.cyclea.pin", GLFW.GLFW_KEY_P);
 
         HudElementRegistry.addLast(
             Identifier.fromNamespaceAndPath("cyclea", "radar"), new CycleaHud());
@@ -81,6 +83,17 @@ public class CycleaClient implements ClientModInitializer {
         while (compactKey.consumeClick()) {
             st.toggleCompact();
         }
+        while (pinKey.consumeClick()) {
+            int n = pushToMinimap(st.getSessionBases());
+            if (n > 0) {
+                say(mc, "§d📍 Pinned §f" + n + "§d base" + (n > 1 ? "s" : "")
+                    + " to your minimap");
+            } else if (!com.otto.cyclea.feature.MinimapBridge.available()) {
+                say(mc, "§7Cyclea: Xaero's Minimap not found — pins unavailable");
+            } else {
+                say(mc, "§7Cyclea: no new bases to pin (all already on the map)");
+            }
+        }
 
         if (!st.isActive() || mc.level == null) {
             return;
@@ -111,6 +124,7 @@ public class CycleaClient implements ClientModInitializer {
             say(mc, "§a✚ " + fresh + " new base" + (fresh > 1 ? "s" : "")
                 + " logged §7(session total " + st.getSessionBaseTotal() + ")");
             exportFinds(st.getSessionBases());
+            pushToMinimap(baseCenters);   // auto-pin new bases to Xaero (if present)
         }
 
         // nearest target + its detail
@@ -166,6 +180,15 @@ public class CycleaClient implements ClientModInitializer {
         }
         return rel > 0 ? "→ turn right " + (int) Math.abs(rel) + "°"
             : "← turn left " + (int) Math.abs(rel) + "°";
+    }
+
+    /** Push bases to Xaero's minimap, guarded so a missing Xaero can't crash us. */
+    private static int pushToMinimap(List<BlockPos> bases) {
+        try {
+            return com.otto.cyclea.feature.MinimapBridge.pushBases(bases);
+        } catch (Throwable t) {
+            return 0;
+        }
     }
 
     private void exportFinds(List<BlockPos> bases) {

@@ -4,5 +4,6 @@
   "key.cyclea.cycle": "Cycle Target",
   "key.cyclea.yup": "Deep-Y +8",
   "key.cyclea.ydown": "Deep-Y -8",
-  "key.cyclea.compact": "Compact HUD"
+  "key.cyclea.compact": "Compact HUD",
+  "key.cyclea.pin": "Pin Bases to Minimap"
 }
