@@ -233,6 +233,12 @@ public final class Autopilot {
             return;   // fighting takes priority this tick
         }
 
+        // 1c) inventory full — stop so nothing valuable is lost
+        if (player.getInventory().getFreeSlot() < 0) {
+            stop(mc, "§einventory full — empty me (into a shulker), then press O");
+            return;
+        }
+
         // 2) base found? (throttled — scanning every tick would lag)
         //    switch to navigating toward it; we hand control back on arrival.
         if (!approaching && ++scanTick >= 40) {
@@ -347,6 +353,7 @@ public final class Autopilot {
         //    (holding one target is what keeps the camera steady instead of jerking).
         if (mining != null && !passable(mc, mining) && !hazard(mc, mining)
             && !hasHazardNeighbor(mc, mining)) {
+            selectToolFor(mc, mc.level.getBlockState(mining));
             key(mc, mc.options.keyUp, false);
             aimAt(player, center(mining));
             key(mc, mc.options.keyAttack, lookingAt(mc, mining));
@@ -354,19 +361,23 @@ public final class Autopilot {
         }
         mining = null;
 
-        // pick the next block to clear: head, then feet, then (if too shallow) descend
-        BlockPos target = null;
-        if (!passable(mc, aheadHead)) {
-            target = aheadHead;
-        } else if (!passable(mc, aheadFeet)) {
-            target = aheadFeet;
-        } else if (feet.getY() > targetY && !passable(mc, aheadFeet.below())
-            && !hazard(mc, aheadFeet.below()) && !hasHazardNeighbor(mc, aheadFeet.below())) {
-            target = aheadFeet.below();   // staircase back down toward Y-59
+        // grab any ore exposed in the tunnel walls first (that's the point of mining)
+        BlockPos target = adjacentOre(mc, feet);
+        // else clear the way: head, then feet, then (if too shallow) descend
+        if (target == null) {
+            if (!passable(mc, aheadHead)) {
+                target = aheadHead;
+            } else if (!passable(mc, aheadFeet)) {
+                target = aheadFeet;
+            } else if (feet.getY() > targetY && !passable(mc, aheadFeet.below())
+                && !hazard(mc, aheadFeet.below()) && !hasHazardNeighbor(mc, aheadFeet.below())) {
+                target = aheadFeet.below();   // staircase back down toward Y-59
+            }
         }
 
         if (target != null) {
             mining = target;
+            selectToolFor(mc, mc.level.getBlockState(target));
             key(mc, mc.options.keyUp, false);
             aimAt(player, center(target));
             key(mc, mc.options.keyAttack, lookingAt(mc, target));
@@ -610,6 +621,56 @@ public final class Autopilot {
         key(mc, mc.options.keyUse, true);
         eating = true;
         eatingTicks = 0;
+    }
+
+    /** Nearest ore block adjacent to the player's feet/head — grab it while passing. */
+    private static BlockPos adjacentOre(Minecraft mc, BlockPos feet) {
+        BlockPos head = feet.above();
+        BlockPos best = null;
+        double bestD = Double.MAX_VALUE;
+        for (BlockPos base : new BlockPos[]{feet, head}) {
+            for (Direction d : Direction.values()) {
+                BlockPos p = base.relative(d);
+                if (isOre(mc.level.getBlockState(p)) && !hasHazardNeighbor(mc, p)) {
+                    double dist = p.distSqr(feet);
+                    if (dist < bestD) {
+                        bestD = dist;
+                        best = p;
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private static boolean isOre(BlockState st) {
+        String path = BuiltInRegistries.BLOCK.getKey(st.getBlock()).getPath();
+        return path.endsWith("_ore") || path.equals("ancient_debris");
+    }
+
+    private static boolean isShovelBlock(BlockState st) {
+        String p = BuiltInRegistries.BLOCK.getKey(st.getBlock()).getPath();
+        return p.contains("dirt") || p.contains("gravel") || p.contains("sand")
+            || p.contains("clay") || p.contains("podzol") || p.contains("mycelium")
+            || p.contains("mud") || p.contains("snow") || p.contains("soul_")
+            || p.equals("grass_block") || p.equals("farmland") || p.equals("dirt_path");
+    }
+
+    /** Pick the right tool for a block: shovel for soft ground, pickaxe otherwise. */
+    private void selectToolFor(Minecraft mc, BlockState st) {
+        Inventory inv = mc.player.getInventory();
+        String want = isShovelBlock(st) ? "shovel" : "pickaxe";
+        int slot = findHotbar(inv, s -> tool(s, want) && !nearlyBroken(s));
+        if (slot < 0 && want.equals("shovel")) {
+            slot = findHotbar(inv, s -> tool(s, "pickaxe") && !nearlyBroken(s));   // fallback
+        }
+        if (slot >= 0 && slot != inv.getSelectedSlot()) {
+            inv.setSelectedSlot(slot);
+        }
+    }
+
+    private static boolean tool(ItemStack s, String suffix) {
+        return !s.isEmpty() && BuiltInRegistries.ITEM.getKey(s.getItem()).getPath().endsWith(suffix);
     }
 
     /** Ensure a healthy pickaxe is selected; switch or fail. */
