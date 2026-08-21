@@ -53,6 +53,12 @@ public class CycleaConfigScreen extends Screen {
             c.cycleOneByOne();
             b.setMessage(oneByOneMsg());
         }).bounds(x, y, w, h).build());
+        y += 26;
+
+        addRenderableWidget(Button.builder(paceMsg(), b -> {
+            c.cyclePace();
+            b.setMessage(paceMsg());
+        }).bounds(x, y, w, h).build());
         y += 40;
 
         addRenderableWidget(Button.builder(Component.literal("Done"), b -> this.onClose())
@@ -77,6 +83,10 @@ public class CycleaConfigScreen extends Screen {
 
     private Component oneByOneMsg() {
         return Component.literal("1×1 trapdoor lane: " + CycleaConfig.get().oneByOneLabel());
+    }
+
+    private Component paceMsg() {
+        return Component.literal("Speed / server pace: " + CycleaConfig.get().paceLabel());
     }
 
     @Override

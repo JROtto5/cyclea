@@ -33,6 +33,30 @@ public final class CycleaConfig {
     public int oreSeekLevel = 1;
     // place a trapdoor ceiling in the tunnel (1×1 sprint-lane trick); needs trapdoors in the hotbar
     public boolean oneByOne = false;
+    // 0 = fast (every tick), 1 = normal (every 2), 2 = slow (every 3) — pace vs the server
+    public int paceLevel = 1;
+
+    /** Act only every N ticks — slows the bot so it doesn't outrun a laggy server. */
+    public int actEveryNTicks() {
+        return switch (paceLevel) {
+            case 0 -> 1;
+            case 2 -> 3;
+            default -> 2;
+        };
+    }
+
+    public String paceLabel() {
+        return switch (paceLevel) {
+            case 0 -> "Fast";
+            case 2 -> "Slow (gentle on server)";
+            default -> "Normal";
+        };
+    }
+
+    public void cyclePace() {
+        paceLevel = (paceLevel + 1) % 3;
+        save();
+    }
 
     public void cycleOneByOne() {
         oneByOne = !oneByOne;
@@ -168,6 +192,7 @@ public final class CycleaConfig {
                 chestMaxY = Integer.parseInt(p.getProperty("chestMaxY", "20"));
                 oreSeekLevel = Integer.parseInt(p.getProperty("oreSeekLevel", "1"));
                 oneByOne = Boolean.parseBoolean(p.getProperty("oneByOne", "false"));
+                paceLevel = Integer.parseInt(p.getProperty("paceLevel", "1"));
             }
         } catch (Exception ignored) {
             // defaults are fine
@@ -182,6 +207,7 @@ public final class CycleaConfig {
         p.setProperty("chestMaxY", Integer.toString(chestMaxY));
         p.setProperty("oreSeekLevel", Integer.toString(oreSeekLevel));
         p.setProperty("oneByOne", Boolean.toString(oneByOne));
+        p.setProperty("paceLevel", Integer.toString(paceLevel));
         try (OutputStream out = Files.newOutputStream(file())) {
             p.store(out, "Cyclea config");
         } catch (IOException ignored) {

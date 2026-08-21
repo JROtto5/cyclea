@@ -55,10 +55,16 @@ public class CycleaHud implements HudElement {
         if (!s.getNearestLine().isEmpty()) {
             g.text(font, s.getBearing() + "   " + s.getVertical(), x, y + 60, 0xFFC0C0C0, true);
         }
-        if (Autopilot.get().isActive()) {
-            long sec = Autopilot.get().getSessionSeconds();
-            g.text(font, "§6AUTO ▶ " + Autopilot.get().getBlocksTraveled() + "m  "
-                + (sec / 60) + "m" + (sec % 60) + "s", x, y + 72, 0xFFFFC060, true);
+        Autopilot ap = Autopilot.get();
+        if (ap.isActive()) {
+            long sec = ap.getSessionSeconds();
+            g.text(font, "§6AUTO ▶ " + ap.getBlocksTraveled() + "m  " + (sec / 60) + "m"
+                + (sec % 60) + "s   §7takeovers " + ap.getTakeovers(), x, y + 72, 0xFFFFC060, true);
+        } else if (ap.getTakeovers() > 0) {
+            // assist metrics: how much you've had to step in
+            g.text(font, "§7You: " + ap.getTakeovers() + " takeovers, "
+                + ap.getHumanControlSeconds() + "s  §8[" + ap.topStopReasons() + "]",
+                x, y + 72, 0xFFA0A0A0, true);
         } else {
             g.text(font, "[ on  ] cycle  \\ compact  O auto  J config", x, y + 72, 0xFF808080, true);
         }

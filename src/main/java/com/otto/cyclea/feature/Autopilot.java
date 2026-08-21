@@ -80,6 +80,35 @@ public final class Autopilot {
     private double lastX = Double.NaN;
     private double lastZ = Double.NaN;
 
+    // human-intervention metrics
+    private int takeovers = 0;
+    private long humanControlMs = 0;
+    private long lastStopMs = 0;
+    private BlockPos lastStopPos = null;
+    private String lastStopReason = "";
+    private boolean handedOff = false;
+    private final java.util.LinkedHashMap<String, Integer> stopReasons = new java.util.LinkedHashMap<>();
+
+    public int getTakeovers() {
+        return takeovers;
+    }
+
+    public long getHumanControlSeconds() {
+        return humanControlMs / 1000;
+    }
+
+    public String getLastStopReason() {
+        return lastStopReason;
+    }
+
+    public String topStopReasons() {
+        return stopReasons.entrySet().stream()
+            .sorted((a, b) -> b.getValue() - a.getValue())
+            .limit(3)
+            .map(e -> e.getKey() + " ×" + e.getValue())
+            .reduce((a, b) -> a + ", " + b).orElse("none");
+    }
+
     public int getBlocksTraveled() {
         return (int) blocksTraveled;
     }
@@ -185,6 +214,16 @@ public final class Autopilot {
         if (active) {
             approaching = false;
             if (mc.player != null) {
+                // if the bot handed off and you took over, log how you helped
+                if (handedOff && lastStopMs > 0) {
+                    long secs = (System.currentTimeMillis() - lastStopMs) / 1000;
+                    humanControlMs += System.currentTimeMillis() - lastStopMs;
+                    double moved = lastStopPos == null ? 0
+                        : Math.sqrt(mc.player.blockPosition().distSqr(lastStopPos));
+                    say(mc, "§a[Assist] §7you took over for §f" + secs + "s§7, moved it §f"
+                        + (int) moved + "m §7past '" + lastStopReason + "'");
+                    handedOff = false;
+                }
                 targetY = -59;   // default diamond level, just above bedrock
                 retarget(mc);
             }
@@ -197,7 +236,53 @@ public final class Autopilot {
     public void stop(Minecraft mc, String reason) {
         active = false;
         releaseAll(mc);
-        say(mc, "§6[Autopilot] §7stopped — " + reason);
+        // log this as a hand-off to the human, categorized
+        takeovers++;
+        lastStopReason = stripCodes(reason);
+        String key = reasonKey(lastStopReason);
+        stopReasons.merge(key, 1, Integer::sum);
+        lastStopMs = System.currentTimeMillis();
+        lastStopPos = mc.player != null ? mc.player.blockPosition() : null;
+        handedOff = true;
+        say(mc, "§6[Autopilot] §7stopped — " + reason
+            + " §8(handoff #" + takeovers + ")");
+    }
+
+    private static String stripCodes(String s) {
+        return s.replaceAll("§.", "").trim();
+    }
+
+    /** Bucket a stop message into a short category for the metrics. */
+    private static String reasonKey(String r) {
+        String s = r.toLowerCase();
+        if (s.contains("lava")) {
+            return "lava";
+        }
+        if (s.contains("water")) {
+            return "water";
+        }
+        if (s.contains("stuck")) {
+            return "stuck";
+        }
+        if (s.contains("boxed")) {
+            return "boxed-in";
+        }
+        if (s.contains("base")) {
+            return "reached base";
+        }
+        if (s.contains("inventory")) {
+            return "inventory full";
+        }
+        if (s.contains("health")) {
+            return "low health";
+        }
+        if (s.contains("drop")) {
+            return "drop/ledge";
+        }
+        if (s.contains("pickaxe")) {
+            return "no pickaxe";
+        }
+        return "other";
     }
 
     /** Called every client tick. Fully guarded — any trouble halts safely. */
@@ -212,8 +297,19 @@ public final class Autopilot {
         }
     }
 
+    private int paceCounter = 0;
+
     private void step(Minecraft mc) {
         var player = mc.player;
+
+        // pace vs the server: on "off" ticks, hold still (don't advance) so the bot
+        // never outruns a laggy server. Mining progress (breakingPos) is preserved.
+        if (++paceCounter < CycleaConfig.get().actEveryNTicks()) {
+            key(mc, mc.options.keyUp, false);
+            key(mc, mc.options.keySprint, false);
+            return;
+        }
+        paceCounter = 0;
 
         // gentle random-walk drift so the aim looks human, not machine-locked
         driftYaw = Mth.clamp(driftYaw + (rng.nextDouble() - 0.5) * 0.35, -1.5, 1.5);
@@ -571,10 +667,12 @@ public final class Autopilot {
                 stop(mc, "§edrop ahead, no blocks to bridge — need you");
                 return;
             }
-            // walk (and sprint) while pointed down the tunnel — tighter tolerance = straighter
-            boolean facing = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 30f;
-            key(mc, mc.options.keyUp, facing);
-            key(mc, mc.options.keySprint, facing);
+            // walk (no sprint — sprinting runs into blocks it hasn't broken yet and
+            // spams the server). Only move when the next 2 blocks are genuinely clear.
+            boolean facing = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 25f;
+            boolean clearAhead = passable(mc, aheadFeet) && passable(mc, aheadHead);
+            key(mc, mc.options.keyUp, facing && clearAhead);
+            key(mc, mc.options.keySprint, false);
         }
     }
 
@@ -790,11 +888,17 @@ public final class Autopilot {
         if (!pos.equals(breakingPos)) {
             mc.gameMode.startDestroyBlock(pos, face);
             breakingPos = pos;
+            mc.player.swing(InteractionHand.MAIN_HAND);
         } else {
             mc.gameMode.continueDestroyBlock(pos, face);
+            if (++swingCd >= 5) {         // throttle swing animation packets (server-friendly)
+                swingCd = 0;
+                mc.player.swing(InteractionHand.MAIN_HAND);
+            }
         }
-        mc.player.swing(InteractionHand.MAIN_HAND);
     }
+
+    private int swingCd = 0;
 
     /** A face of {@code pos} that's open to air (prefer the one toward the player). */
     private Direction faceToward(Minecraft mc, BlockPos pos) {
