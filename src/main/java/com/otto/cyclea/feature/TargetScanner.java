@@ -5,108 +5,163 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
+import net.minecraft.world.level.block.entity.BarrelBlockEntity;
+import net.minecraft.world.level.block.entity.BeaconBlockEntity;
+import net.minecraft.world.level.block.entity.BeehiveBlockEntity;
+import net.minecraft.world.level.block.entity.BellBlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BrewingStandBlockEntity;
+import net.minecraft.world.level.block.entity.CampfireBlockEntity;
+import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.entity.CrafterBlockEntity;
+import net.minecraft.world.level.block.entity.DispenserBlockEntity;
+import net.minecraft.world.level.block.entity.EnchantingTableBlockEntity;
+import net.minecraft.world.level.block.entity.EnderChestBlockEntity;
+import net.minecraft.world.level.block.entity.HopperBlockEntity;
+import net.minecraft.world.level.block.entity.JukeboxBlockEntity;
+import net.minecraft.world.level.block.entity.LecternBlockEntity;
+import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
+import net.minecraft.world.level.block.entity.SignBlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.npc.villager.Villager;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.entity.BarrelBlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.ChestBlockEntity;
-import net.minecraft.world.level.block.entity.EnderChestBlockEntity;
-import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
- * Finds everything matching the active target.
+ * The finder brain. Reads loaded block entities (cheap, covers the whole render
+ * distance) and turns them into targets.
  *
- * Chests and spawners are block entities, so we read the level's loaded
- * block-entity map directly — that covers your whole render distance for free,
- * no cube scan, no radius ceiling. Villages come from loaded villager entities.
- * Only caves (plain cave-air blocks) fall back to a bounded cube scan, since
- * those aren't block entities.
+ * The star feature is BASES — a "cluster bomb": every container and workstation
+ * a player builds (chests, barrels, furnaces, hoppers, brewing stands, beacons,
+ * signs, lecterns, and so on) is a block entity, so a tight concentration of
+ * them is almost always a base. We gather that whole signature set and flood-
+ * fill it into clusters; each dense cluster is a base.
  */
 public final class TargetScanner {
 
     private TargetScanner() {
     }
 
-    public static List<BlockPos> scan(Minecraft mc) {
-        List<BlockPos> hits = new ArrayList<>();
+    /** Result of a scan: the target hits plus the tallies the HUD shows. */
+    public record Scan(List<BlockPos> hits, int chests, int shulkers, int bases) {
+    }
+
+    public static Scan scan(Minecraft mc) {
         ClientLevel level = mc.level;
         if (level == null || mc.player == null) {
-            return hits;
+            return new Scan(List.of(), 0, 0, 0);
         }
         CycleaState state = CycleaState.get();
 
-        switch (state.getTarget()) {
-            case CHESTS -> {
-                for (BlockEntity be : loadedBlockEntities(mc, level)) {
-                    // ChestBlockEntity also covers trapped chests (its subclass)
-                    if (be instanceof ChestBlockEntity
-                        || be instanceof EnderChestBlockEntity
-                        || be instanceof BarrelBlockEntity) {
-                        if (be.getBlockPos().getY() <= CycleaState.DEEP_MAX_Y) {
-                            hits.add(be.getBlockPos());
-                        }
+        List<BlockEntity> loaded = loadedBlockEntities(mc, level);
+
+        // tallies (independent of the active target, for the HUD)
+        int chests = 0;
+        int shulkers = 0;
+        List<BlockPos> signatures = new ArrayList<>();
+        for (BlockEntity be : loaded) {
+            if (be instanceof ShulkerBoxBlockEntity) {
+                shulkers++;
+            }
+            if ((be instanceof ChestBlockEntity || be instanceof BarrelBlockEntity
+                || be instanceof EnderChestBlockEntity) && be.getBlockPos().getY() <= CycleaState.DEEP_MAX_Y) {
+                chests++;
+            }
+            if (isBaseSignature(be)) {
+                signatures.add(be.getBlockPos());
+            }
+        }
+        List<BlockPos> baseCenters = clumps(signatures, 10, 4);
+
+        List<BlockPos> hits = switch (state.getTarget()) {
+            case BASES -> baseCenters;
+            case LOOT -> {
+                List<BlockPos> out = new ArrayList<>();
+                for (BlockEntity be : loaded) {
+                    if (be instanceof ShulkerBoxBlockEntity) {
+                        out.add(be.getBlockPos());
+                    } else if ((be instanceof ChestBlockEntity || be instanceof BarrelBlockEntity
+                        || be instanceof EnderChestBlockEntity)
+                        && be.getBlockPos().getY() <= CycleaState.DEEP_MAX_Y) {
+                        out.add(be.getBlockPos());
                     }
                 }
+                yield out;
             }
             case SHULKERS -> {
-                // shulkers everywhere, every level
-                for (BlockEntity be : loadedBlockEntities(mc, level)) {
+                List<BlockPos> out = new ArrayList<>();
+                for (BlockEntity be : loaded) {
                     if (be instanceof ShulkerBoxBlockEntity) {
-                        hits.add(be.getBlockPos());
+                        out.add(be.getBlockPos());
                     }
                 }
+                yield out;
             }
             case SPAWNERS -> {
-                for (BlockEntity be : loadedBlockEntities(mc, level)) {
+                List<BlockPos> out = new ArrayList<>();
+                for (BlockEntity be : loaded) {
                     if (be.getBlockPos().getY() > CycleaState.DEEP_MAX_Y) {
                         continue;
                     }
                     BlockState s = level.getBlockState(be.getBlockPos());
                     if (s.is(Blocks.SPAWNER) || s.is(Blocks.TRIAL_SPAWNER) || s.is(Blocks.VAULT)) {
-                        hits.add(be.getBlockPos());
+                        out.add(be.getBlockPos());
                     }
                 }
+                yield out;
             }
-            case VILLAGES -> {
-                for (Entity e : level.entitiesForRendering()) {
-                    if (e instanceof Villager) {
-                        hits.add(e.blockPosition());
+            case CAVES -> scanCaves(mc, level, state.getRadius());
+        };
+
+        return new Scan(hits, chests, shulkers, baseCenters.size());
+    }
+
+    /** Any container or workstation a player places — the base fingerprint. */
+    private static boolean isBaseSignature(BlockEntity be) {
+        return be instanceof ChestBlockEntity
+            || be instanceof BarrelBlockEntity
+            || be instanceof ShulkerBoxBlockEntity
+            || be instanceof EnderChestBlockEntity
+            || be instanceof AbstractFurnaceBlockEntity
+            || be instanceof HopperBlockEntity
+            || be instanceof DispenserBlockEntity
+            || be instanceof BrewingStandBlockEntity
+            || be instanceof BeaconBlockEntity
+            || be instanceof BellBlockEntity
+            || be instanceof LecternBlockEntity
+            || be instanceof SignBlockEntity
+            || be instanceof CampfireBlockEntity
+            || be instanceof BeehiveBlockEntity
+            || be instanceof JukeboxBlockEntity
+            || be instanceof EnchantingTableBlockEntity
+            || be instanceof CrafterBlockEntity;
+    }
+
+    private static List<BlockPos> scanCaves(Minecraft mc, ClientLevel level, int r) {
+        List<BlockPos> hits = new ArrayList<>();
+        BlockPos origin = mc.player.blockPosition();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int dx = -r; dx <= r; dx += 2) {
+            for (int dz = -r; dz <= r; dz += 2) {
+                for (int dy = -r; dy <= r; dy += 2) {
+                    cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
+                    if (level.isOutsideBuildHeight(cursor.getY())) {
+                        continue;
                     }
-                }
-                return dedupeNearby(hits, 24);
-            }
-            case CAVES -> {
-                BlockPos origin = mc.player.blockPosition();
-                int r = state.getRadius();
-                BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
-                for (int dx = -r; dx <= r; dx += 2) {
-                    for (int dz = -r; dz <= r; dz += 2) {
-                        for (int dy = -r; dy <= r; dy += 2) {
-                            cursor.set(origin.getX() + dx, origin.getY() + dy, origin.getZ() + dz);
-                            if (level.isOutsideBuildHeight(cursor.getY())) {
-                                continue;
-                            }
-                            if (level.getBlockState(cursor).is(Blocks.CAVE_AIR)) {
-                                hits.add(cursor.immutable());
-                                if (hits.size() > 200) {
-                                    return dedupeNearby(hits, 12);
-                                }
-                            }
+                    if (level.getBlockState(cursor).is(Blocks.CAVE_AIR)) {
+                        hits.add(cursor.immutable());
+                        if (hits.size() > 200) {
+                            return dedupeNearby(hits, 12);
                         }
                     }
                 }
-                return dedupeNearby(hits, 12);
             }
         }
-        return hits;
+        return dedupeNearby(hits, 12);
     }
 
     /** Every block entity in the currently loaded chunks around the player. */
@@ -129,10 +184,9 @@ public final class TargetScanner {
     }
 
     /**
-     * Groups positions that sit close together (a "clump" — double chests,
-     * shulker walls, storage rooms) into cluster centers. Only groups of at
-     * least {@code minSize} are returned, each as the position of its first
-     * member. Simple flood-fill; fine for the counts a client sees.
+     * Flood-fills nearby positions into clusters; returns the first member of
+     * every cluster of at least {@code minSize}. Used both for base detection
+     * and for the "clump" alert.
      */
     public static List<BlockPos> clumps(List<BlockPos> pts, int reach, int minSize) {
         List<BlockPos> centers = new ArrayList<>();

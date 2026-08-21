@@ -5,6 +5,7 @@ import com.otto.cyclea.feature.TargetScanner;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
@@ -15,11 +16,9 @@ import org.lwjgl.glfw.GLFW;
 import java.util.List;
 
 /**
- * Cyclea entry point (v1). Registers the toggle + cycle keys, scans for the
- * active target a few times a second, and calls out the nearest one in chat
- * with a compass heading and distance — a lightweight "finder" pointer that
- * pairs with your minimap. In-world guide-beams land in a later version once
- * the 26.2 render pipeline is wired up.
+ * Cyclea entry point (v2). Registers the toggle + cycle keys and the radar HUD,
+ * scans a few times a second, and keeps the shared state's tallies and
+ * nearest-target line up to date. Bases target = the "cluster bomb".
  */
 public class CycleaClient implements ClientModInitializer {
 
@@ -36,6 +35,9 @@ public class CycleaClient implements ClientModInitializer {
             new KeyMapping("key.cyclea.toggle", GLFW.GLFW_KEY_LEFT_BRACKET, CATEGORY));
         cycleKey = KeyMappingHelper.registerKeyMapping(
             new KeyMapping("key.cyclea.cycle", GLFW.GLFW_KEY_RIGHT_BRACKET, CATEGORY));
+
+        HudElementRegistry.addLast(
+            Identifier.fromNamespaceAndPath("cyclea", "radar"), new CycleaHud());
 
         ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
     }
@@ -58,50 +60,56 @@ public class CycleaClient implements ClientModInitializer {
         if (!CycleaState.get().isActive() || mc.level == null) {
             return;
         }
-        if (++tickCounter < 40) {
+        if (++tickCounter < 20) {
             return;
         }
         tickCounter = 0;
 
-        List<BlockPos> found = TargetScanner.scan(mc);
-        CycleaState.get().setFound(found);
-        reportNearest(mc, found);
+        TargetScanner.Scan scan = TargetScanner.scan(mc);
+        CycleaState.get().setFound(scan.hits());
+        String nearest = buildNearest(mc, scan.hits());
+        CycleaState.get().setTallies(scan.chests(), scan.shulkers(), scan.bases(), nearest);
     }
 
-    private void reportNearest(Minecraft mc, List<BlockPos> found) {
+    /** Build the "nearest" line for the HUD, with a red clump/base flag. */
+    private String buildNearest(Minecraft mc, List<BlockPos> found) {
+        CycleaState.Target target = CycleaState.get().getTarget();
         if (found.isEmpty()) {
-            String where = CycleaState.get().getTarget() == CycleaState.Target.CAVES
-                ? " within " + CycleaState.get().getRadius() + " blocks"
-                : " in loaded chunks";
-            say(mc, "§7Cyclea: no " + CycleaState.get().getTarget().label + where);
-            return;
+            return "§7no " + target.label + " loaded nearby";
         }
         BlockPos me = mc.player.blockPosition();
-        CycleaState.Target target = CycleaState.get().getTarget();
 
-        // Look for clumps first (double chests, shulker walls, storage rooms).
-        boolean clumpable = target == CycleaState.Target.CHESTS
-            || target == CycleaState.Target.SHULKERS
-            || target == CycleaState.Target.SPAWNERS;
+        boolean clumpable = target == CycleaState.Target.LOOT
+            || target == CycleaState.Target.SHULKERS;
         if (clumpable) {
             List<BlockPos> clumps = TargetScanner.clumps(found, 3, 2);
             if (!clumps.isEmpty()) {
                 BlockPos c = nearest(me, clumps);
-                int cd = (int) Math.sqrt(me.distSqr(c));
-                say(mc, "§c⚠ CLUMP found! §f" + clumps.size() + " "
-                    + target.label + " clump" + (clumps.size() > 1 ? "s" : "")
-                    + " §7— nearest §f" + cd + "m " + heading(c.getX() - me.getX(), c.getZ() - me.getZ())
-                    + " §c(" + c.getX() + ", " + c.getY() + ", " + c.getZ() + ")");
-                return;
+                announceClump(mc, target, clumps.size(), me, c);
+                return "§c⚠ " + clumps.size() + " clump" + (clumps.size() > 1 ? "s" : "")
+                    + " — nearest " + line(me, c);
             }
         }
 
         BlockPos best = nearest(me, found);
-        int dist = (int) Math.sqrt(me.distSqr(best));
-        String dir = heading(best.getX() - me.getX(), best.getZ() - me.getZ());
-        say(mc, "§bCyclea ▶ §f" + found.size() + " " + target.label
-            + "§7 — nearest §f" + dist + "m " + dir
-            + " §8(" + best.getX() + ", " + best.getY() + ", " + best.getZ() + ")");
+        String tag = target == CycleaState.Target.BASES ? "§cBASE" : "§fnearest";
+        return tag + " §7" + line(me, best);
+    }
+
+    private long lastClumpAnnounce = 0;
+
+    private void announceClump(Minecraft mc, CycleaState.Target target, int n, BlockPos me, BlockPos c) {
+        // throttle the chat shout so it isn't spammy (once every ~5s of ticks)
+        if (tickCounter == 0 && lastClumpAnnounce++ % 10 == 0) {
+            say(mc, "§c⚠ CLUMP found! §f" + n + " " + target.label
+                + " clump" + (n > 1 ? "s" : "") + " §7— nearest " + line(me, c));
+        }
+    }
+
+    private static String line(BlockPos me, BlockPos p) {
+        int dist = (int) Math.sqrt(me.distSqr(p));
+        return "§f" + dist + "m " + heading(p.getX() - me.getX(), p.getZ() - me.getZ())
+            + " §8(" + p.getX() + ", " + p.getY() + ", " + p.getZ() + ")";
     }
 
     private static BlockPos nearest(BlockPos me, List<BlockPos> pts) {

@@ -6,24 +6,22 @@ nearest one — a "mod-of-mods" companion that pairs with any minimap.
 
 > By **John Rydell** · MIT licensed · single-player / your-own-server use.
 
-## Features (v1.2)
+## Features (v2.0) — Base Radar
 
-- **Cycle targets** on a keypress: Chests (≤Y20) → Shulkers (all levels) → Spawners & Vaults (≤Y20) → Villages → Caves.
-- **Dedicated Shulker finder** (all 17 colors, every Y level), separate from chests.
-- **Deep-loot filter:** chests/barrels/ender chests and spawners/vaults are only
-  reported at **Y ≤ 20** — cuts surface clutter, surfaces buried bases & dungeons.
-- **Clump alert:** when chests or shulkers are bunched together (double chests,
-  storage rooms, shulker walls) Cyclea flags it in **red** — `⚠ CLUMP found!` —
-  so a stash stands out from a lone chest.
-- **Whole-render-distance scan** for chests/spawners via loaded block entities —
-  no radius ceiling, no lag from a cube scan.
-- **Nearest-target pointer** in chat: count, distance, compass heading, and exact
-  coordinates — e.g. `Cyclea ▶ 3 Chests, Shulkers & Ender — nearest 42m NE (128, 41, -76)`.
-- Scans a few times a second on a background cadence.
-
-**Roadmap:** in-world guide-beams (rendered lines/arrows to each target). The
-26.2 render pipeline moved to a deferred `SubmitNodeCollector` model; the hook is
-`LevelRenderEvents.BEFORE_GIZMOS` + `submitCustomGeometry`, still being wired up.
+- **Base finder (the "cluster bomb"):** every container and workstation a player
+  builds — chests, barrels, shulkers, ender chests, furnaces, hoppers, brewing
+  stands, beacons, signs, lecterns, campfires, beehives, jukeboxes, enchanting
+  tables, crafters — is a block entity. Cyclea gathers that whole fingerprint set
+  across your render distance and flood-fills it into clusters. A dense cluster of
+  them is a **base**. It counts them and points you at the nearest one.
+- **On-screen HUD** (top-left): live tallies — Bases / Chests≤20 / Shulkers — plus
+  the active target and the nearest hit with heading + coordinates.
+- **Target modes** (cycle with `]`): Bases → Loot (chests≤Y20 + shulkers) →
+  Shulkers (all levels) → Spawners & Vaults (≤Y20) → Caves.
+- **Deep-loot filter:** chests/barrels/ender chests and spawners/vaults report only
+  at **Y ≤ 20**. Shulkers are unfiltered (every level).
+- **Red clump alert:** bunched chests/shulkers (double chests, shulker walls,
+  storage rooms) flash `⚠ CLUMP found!` in red so a stash stands out.
 
 ## Controls
 
