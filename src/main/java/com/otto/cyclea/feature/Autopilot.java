@@ -216,7 +216,8 @@ public final class Autopilot {
 
         // 7) if we're already committed to a block, keep on it until it's gone
         //    (holding one target is what keeps the camera steady instead of jerking).
-        if (mining != null && (!passable(mc, mining) && !hazard(mc, mining))) {
+        if (mining != null && !passable(mc, mining) && !hazard(mc, mining)
+            && !hasHazardNeighbor(mc, mining)) {
             key(mc, mc.options.keyUp, false);
             aimAt(player, center(mining));
             key(mc, mc.options.keyAttack, lookingAt(mc, mining));
@@ -231,7 +232,7 @@ public final class Autopilot {
         } else if (!passable(mc, aheadFeet)) {
             target = aheadFeet;
         } else if (feet.getY() > targetY && !passable(mc, aheadFeet.below())
-            && !hazard(mc, aheadFeet.below())) {
+            && !hazard(mc, aheadFeet.below()) && !hasHazardNeighbor(mc, aheadFeet.below())) {
             target = aheadFeet.below();   // staircase back down toward Y-59
         }
 
@@ -306,32 +307,41 @@ public final class Autopilot {
         return null;
     }
 
-    /** True if the next {@code dist} blocks along {@code d} are free of lava/water. */
+    /**
+     * True if we can safely travel {@code dist} blocks along {@code d}: never
+     * stepping into lava/water, and never mining a block that has lava or water
+     * directly behind it (which would flood in). Solid rock next to lava is fine
+     * to pass through — that's what lets it thread a lava maze and back out.
+     */
     private static boolean pathClear(Minecraft mc, BlockPos feet, Direction d, int dist) {
         for (int i = 1; i <= dist; i++) {
             BlockPos af = feet.relative(d, i);
-            BlockPos ah = af.above();
-            if (lavaNear(mc, af, 2) || lavaNear(mc, ah, 2)) {
+            if (!travelOk(mc, af) || !travelOk(mc, af.above())) {
                 return false;
             }
-            if (i == 1 && (hazard(mc, af) || hazard(mc, ah) || hazard(mc, af.below()))) {
-                return false;
+            if (i == 1 && mc.level.getBlockState(af.below()).is(Blocks.LAVA)) {
+                return false;   // would step onto/into lava floor
             }
         }
         return true;
     }
 
-    /** Scan a box of half-size r around a position for lava — catches pockets before we dig in. */
-    private static boolean lavaNear(Minecraft mc, BlockPos c, int r) {
-        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
-        for (int dx = -r; dx <= r; dx++) {
-            for (int dy = -r; dy <= r; dy++) {
-                for (int dz = -r; dz <= r; dz++) {
-                    m.set(c.getX() + dx, c.getY() + dy, c.getZ() + dz);
-                    if (mc.level.getBlockState(m).is(Blocks.LAVA)) {
-                        return true;
-                    }
-                }
+    /** A block is OK to move through: not a hazard to enter, and if solid (we'd
+     *  mine it) it has no lava/water neighbor that would flood in when broken. */
+    private static boolean travelOk(Minecraft mc, BlockPos pos) {
+        BlockState st = mc.level.getBlockState(pos);
+        if (st.is(Blocks.LAVA) || st.is(Blocks.WATER)) {
+            return false;
+        }
+        return passable(mc, pos) || !hasHazardNeighbor(mc, pos);
+    }
+
+    /** Any of the 6 neighbors is lava or water (so mining this block risks a flood). */
+    private static boolean hasHazardNeighbor(Minecraft mc, BlockPos pos) {
+        for (Direction d : Direction.values()) {
+            BlockState st = mc.level.getBlockState(pos.relative(d));
+            if (st.is(Blocks.LAVA) || st.is(Blocks.WATER)) {
+                return true;
             }
         }
         return false;
