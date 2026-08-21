@@ -897,30 +897,18 @@ public final class Autopilot {
     }
 
     /**
-     * Actually BREAK the block — aim at it AND drive the game's own destroy calls
-     * (start then continue) plus the swing animation, so it mines regardless of a
-     * pixel-perfect crosshair. This is what makes it swing instead of just staring.
+     * Break the block the RELIABLE way: snap-aim at it and HOLD attack, letting
+     * vanilla mining accumulate break progress (exactly like a human holding
+     * left-click). The old direct start/continueDestroyBlock approach reset its
+     * own progress whenever we briefly walked/paced — this doesn't.
      */
     private void swingAt(Minecraft mc, BlockPos pos) {
         selectToolFor(mc, mc.level.getBlockState(pos));
         key(mc, mc.options.keyUp, false);
         key(mc, mc.options.keySprint, false);
         aimAtFast(mc.player, center(pos));
-        Direction face = faceToward(mc, pos);
-        if (!pos.equals(breakingPos)) {
-            mc.gameMode.startDestroyBlock(pos, face);
-            breakingPos = pos;
-            mc.player.swing(InteractionHand.MAIN_HAND);
-        } else {
-            mc.gameMode.continueDestroyBlock(pos, face);
-            if (++swingCd >= 5) {         // throttle swing animation packets (server-friendly)
-                swingCd = 0;
-                mc.player.swing(InteractionHand.MAIN_HAND);
-            }
-        }
+        key(mc, mc.options.keyAttack, true);   // hold to mine whatever we're aimed at
     }
-
-    private int swingCd = 0;
 
     /** A face of {@code pos} that's open to air (prefer the one toward the player). */
     private Direction faceToward(Minecraft mc, BlockPos pos) {
