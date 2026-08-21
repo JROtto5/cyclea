@@ -762,7 +762,9 @@ public final class Autopilot {
         for (BlockPos base : new BlockPos[]{feet, feet.above()}) {
             for (Direction d : Direction.values()) {
                 BlockPos p = base.relative(d);
-                if (isOre(mc.level.getBlockState(p)) && !hasHazardNeighbor(mc, p)) {
+                String path = BuiltInRegistries.BLOCK.getKey(
+                    mc.level.getBlockState(p).getBlock()).getPath();
+                if (CycleaConfig.get().wantsOre(path) && !hasHazardNeighbor(mc, p)) {
                     double dist = p.distSqr(feet);
                     if (dist < bestD) {
                         bestD = dist;
