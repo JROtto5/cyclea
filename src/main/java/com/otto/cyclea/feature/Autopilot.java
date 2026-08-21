@@ -10,6 +10,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
@@ -56,6 +57,69 @@ public final class Autopilot {
     private Direction detourDir = null;   // committed detour while routing around lava
     private int detourTicks = 0;
 
+    // search strategy
+    public enum SearchMode { SWEEP, SPAWN }
+    private SearchMode searchMode = SearchMode.SWEEP;   // sweep an expanding area (finds far more)
+    private static final int[][] DIRS = {{1, 0}, {0, -1}, {-1, 0}, {0, 1}};   // E, N, W, S
+    private static final int SWEEP_STEP = 48;           // blocks per spiral leg unit
+    private int spiralCornerX = 0;
+    private int spiralCornerZ = 0;
+    private int legLen = 1;
+    private int stepInPair = 0;
+    private int dirIdx = 0;
+
+    public SearchMode getSearchMode() {
+        return searchMode;
+    }
+
+    public String toggleSearchMode(Minecraft mc) {
+        searchMode = searchMode == SearchMode.SWEEP ? SearchMode.SPAWN : SearchMode.SWEEP;
+        if (active) {
+            retarget(mc);
+        }
+        return searchMode.name();
+    }
+
+    /** Point the bot at its first goal for the current mode. */
+    private void retarget(Minecraft mc) {
+        if (mc.player == null) {
+            return;
+        }
+        if (searchMode == SearchMode.SWEEP) {
+            newSpiral(mc);
+        } else {
+            targetX = 0;
+            targetZ = 0;
+            newLeg(mc);
+        }
+    }
+
+    private void newSpiral(Minecraft mc) {
+        spiralCornerX = (int) mc.player.getX();
+        spiralCornerZ = (int) mc.player.getZ();
+        legLen = 1;
+        stepInPair = 0;
+        dirIdx = 0;
+        nextSpiralTarget();
+        newLeg(mc);
+    }
+
+    private void nextSpiralTarget() {
+        targetX = spiralCornerX + DIRS[dirIdx][0] * legLen * SWEEP_STEP;
+        targetZ = spiralCornerZ + DIRS[dirIdx][1] * legLen * SWEEP_STEP;
+    }
+
+    private void advanceSpiral() {
+        spiralCornerX = targetX;
+        spiralCornerZ = targetZ;
+        dirIdx = (dirIdx + 1) & 3;
+        if (++stepInPair == 2) {
+            stepInPair = 0;
+            legLen++;
+        }
+        nextSpiralTarget();
+    }
+
     private void newLeg(Minecraft mc) {
         if (mc.player != null) {
             startX = mc.player.getX();
@@ -90,7 +154,7 @@ public final class Autopilot {
             approaching = false;
             if (mc.player != null) {
                 targetY = mc.player.blockPosition().getY();   // hold the depth you start at
-                newLeg(mc);
+                retarget(mc);
             }
         } else {
             releaseAll(mc);
@@ -123,9 +187,9 @@ public final class Autopilot {
         driftYaw = Mth.clamp(driftYaw + (rng.nextDouble() - 0.5) * 0.35, -1.5, 1.5);
         driftPitch = Mth.clamp(driftPitch + (rng.nextDouble() - 0.5) * 0.25, -1.0, 1.0);
 
-        // 1) survival guard
-        if (player.getHealth() <= 6.0f) {
-            stop(mc, "§clow health");
+        // 1) survival guard (heal attempts happen in step 3; only bail if truly critical)
+        if (player.getHealth() <= 4.0f) {
+            stop(mc, "§ccritical health");
             return;
         }
 
@@ -166,12 +230,15 @@ public final class Autopilot {
         if (Math.abs(dx) < 3 && Math.abs(dz) < 3) {
             if (approaching) {
                 approaching = false;
-                targetX = 0;   // restore the sweep goal (spawn) for next time
-                targetZ = 0;
-                stop(mc, "§a✔ arrived at base — §fyour turn (press O to resume toward spawn)");
-            } else {
-                stop(mc, "reached target area");
+                stop(mc, "§a✔ arrived at base — §fyour turn (press O to resume the sweep)");
+                return;
             }
+            if (searchMode == SearchMode.SWEEP) {
+                advanceSpiral();   // reached a sweep corner — turn and keep covering ground
+                newLeg(mc);
+                return;
+            }
+            stop(mc, "reached spawn area");
             return;
         }
         // choose which axis to advance so we staircase diagonally toward the target,
@@ -415,21 +482,35 @@ public final class Autopilot {
             return true;
         }
 
+        // heal first: low HP + a golden apple on the hotbar
+        if (player.getHealth() <= 10f) {
+            int gap = findHotbar(inv, s -> s.is(Items.GOLDEN_APPLE) || s.is(Items.ENCHANTED_GOLDEN_APPLE));
+            if (gap >= 0) {
+                startConsume(mc, inv, gap);
+                return true;
+            }
+        }
+        // then hunger: real food only (don't waste golden apples on hunger)
         if (food > 14) {
             return false;
         }
-        int foodSlot = findHotbar(inv, s -> s.has(DataComponents.FOOD));
+        int foodSlot = findHotbar(inv, s -> s.has(DataComponents.FOOD)
+            && !s.is(Items.GOLDEN_APPLE) && !s.is(Items.ENCHANTED_GOLDEN_APPLE));
         if (foodSlot < 0) {
             return false;   // no food; keep going and hope
         }
+        startConsume(mc, inv, foodSlot);
+        return true;
+    }
+
+    private void startConsume(Minecraft mc, Inventory inv, int slot) {
         prevSlot = inv.getSelectedSlot();
-        inv.setSelectedSlot(foodSlot);
+        inv.setSelectedSlot(slot);
         key(mc, mc.options.keyUp, false);
         mc.gameMode.stopDestroyBlock();
         key(mc, mc.options.keyUse, true);
         eating = true;
         eatingTicks = 0;
-        return true;
     }
 
     /** Ensure a healthy pickaxe is selected; switch or fail. */

@@ -38,6 +38,7 @@ public class CycleaClient implements ClientModInitializer {
     private KeyMapping compactKey;
     private KeyMapping pinKey;
     private KeyMapping autopilotKey;
+    private KeyMapping searchModeKey;
     private int tickCounter = 0;
     private List<TargetScanner.Base> lastBases = List.of();
 
@@ -48,10 +49,37 @@ public class CycleaClient implements ClientModInitializer {
         compactKey = reg("key.cyclea.compact", GLFW.GLFW_KEY_BACKSLASH);
         pinKey = reg("key.cyclea.pin", GLFW.GLFW_KEY_P);
         autopilotKey = reg("key.cyclea.autopilot", GLFW.GLFW_KEY_O);
+        searchModeKey = reg("key.cyclea.searchmode", GLFW.GLFW_KEY_K);
 
         HudElementRegistry.addLast(
             Identifier.fromNamespaceAndPath("cyclea", "radar"), new CycleaHud());
         ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
+        loadPriorFinds();
+    }
+
+    /** Seed bases discovered in past sessions so they don't re-alert on rejoin. */
+    private void loadPriorFinds() {
+        try {
+            Path file = FabricLoader.getInstance().getGameDir().resolve("cyclea-finds.txt");
+            if (!Files.exists(file)) {
+                return;
+            }
+            List<BlockPos> prior = new ArrayList<>();
+            for (String ln : Files.readAllLines(file)) {
+                String[] p = ln.split("\\s*,\\s*");
+                if (p.length == 3) {
+                    try {
+                        prior.add(new BlockPos(Integer.parseInt(p[0].trim()),
+                            Integer.parseInt(p[1].trim()), Integer.parseInt(p[2].trim())));
+                    } catch (NumberFormatException ignored) {
+                        // header/comment line
+                    }
+                }
+            }
+            CycleaState.get().seedSeen(prior);
+        } catch (Exception ignored) {
+            // non-fatal
+        }
     }
 
     private static KeyMapping reg(String id, int key) {
@@ -95,6 +123,12 @@ public class CycleaClient implements ClientModInitializer {
             } else {
                 say(mc, "§6[Autopilot] §7disengaged");
             }
+        }
+
+        while (searchModeKey.consumeClick()) {
+            String m = Autopilot.get().toggleSearchMode(mc);
+            say(mc, "§6[Autopilot] §7search mode → §f" + m
+                + ("SWEEP".equals(m) ? " §7(spiral-search this area)" : " §7(beeline to spawn)"));
         }
 
         // drive the bot every tick (it self-guards and no-ops when off)

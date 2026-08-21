@@ -53,13 +53,21 @@ public final class MinimapBridge {
                 }
                 String name = "Base Y" + b.getY() + " (" + base.chests() + "c "
                     + base.shulkers() + "s)";
-                set.add(new Waypoint(b.getX(), b.getY(), b.getZ(), name, "B", WaypointColor.RED));
+                set.add(new Waypoint(b.getX(), b.getY(), b.getZ(), name, "B", colorFor(base)));
                 added++;
             }
             return added;
         } catch (Throwable t) {
             return 0;
         }
+    }
+
+    /** Red = loaded, gold = some loot, gray = likely raided. */
+    private static WaypointColor colorFor(TargetScanner.Base b) {
+        if (b.shulkers() >= 1 || b.chests() >= 8) {
+            return WaypointColor.RED;
+        }
+        return b.chests() >= 4 ? WaypointColor.GOLD : WaypointColor.GRAY;
     }
 
     private static WaypointSet currentSet() {

@@ -110,18 +110,27 @@ public final class CycleaState {
         found.addAll(positions);
     }
 
+    private static long keyFor(BlockPos b) {
+        return (((long) (b.getX() >> 4)) & 0x3FFFFFFL) << 34 | (((long) (b.getZ() >> 4)) & 0x3FFFFFFL);
+    }
+
     /** Record base positions into the cumulative session log; returns how many were new. */
     public synchronized int recordBases(List<BlockPos> bases) {
         int fresh = 0;
         for (BlockPos b : bases) {
-            long key = (((long) (b.getX() >> 4)) & 0x3FFFFFFL) << 34
-                | (((long) (b.getZ() >> 4)) & 0x3FFFFFFL);
-            if (seenBaseKeys.add(key)) {
+            if (seenBaseKeys.add(keyFor(b))) {
                 sessionBases.add(b);
                 fresh++;
             }
         }
         return fresh;
+    }
+
+    /** Seed already-known bases from a prior session so they don't re-alert. */
+    public synchronized void seedSeen(List<BlockPos> bases) {
+        for (BlockPos b : bases) {
+            seenBaseKeys.add(keyFor(b));
+        }
     }
 
     public synchronized List<BlockPos> getSessionBases() {
