@@ -53,6 +53,8 @@ public final class Autopilot {
     private int glanceTimer = 0;      // countdown to the next "look around" while walking
     private float glanceYaw = 0;      // current look-around offset (degrees) added while walking
     private float glancePitch = 0;
+    private Direction detourDir = null;   // committed detour while routing around lava
+    private int detourTicks = 0;
 
     private void newLeg(Minecraft mc) {
         if (mc.player != null) {
@@ -263,25 +265,60 @@ public final class Autopilot {
     }
 
     /**
-     * Pick the first direction that's safe to head into — preferring progress
-     * toward the target, then sidestepping to route around lava/water. Null if
-     * every option is blocked by a hazard.
+     * Pick a direction to head into — preferring progress toward the target, but
+     * routing around lava/water. Looks 3 blocks ahead so it detours early, and
+     * commits to a detour for a while so it clears the pocket instead of hugging
+     * the edge. Null only if boxed in on every side.
      */
-    private static Direction chooseSafeDir(Minecraft mc, BlockPos feet,
-                                           Direction primary, Direction secondary) {
-        Direction[] candidates = {primary, secondary, secondary.getOpposite(), primary.getOpposite()};
-        for (Direction d : candidates) {
-            BlockPos af = feet.relative(d);
-            BlockPos ah = af.above();
-            if (lavaNear(mc, af, 2) || lavaNear(mc, ah, 2)) {
-                continue;   // lava pocket — avoid
+    private Direction chooseSafeDir(Minecraft mc, BlockPos feet,
+                                    Direction primary, Direction secondary) {
+        Direction[] base = {primary, secondary, secondary.getOpposite(), primary.getOpposite()};
+        Direction committed = detourTicks > 0 ? detourDir : null;
+
+        // pass 1: a direction that's clear for 3 blocks ahead (route early)
+        Direction pick = firstSafe(mc, feet, committed, base, 3);
+        // pass 2: fall back to a direction that's at least safe right in front
+        if (pick == null) {
+            pick = firstSafe(mc, feet, committed, base, 1);
+        }
+        if (pick == null) {
+            return null;
+        }
+        if (pick != primary) {
+            detourDir = pick;
+            detourTicks = 25;   // stick with the detour to clear the pocket
+        } else if (detourTicks > 0) {
+            detourTicks--;
+        }
+        return pick;
+    }
+
+    private static Direction firstSafe(Minecraft mc, BlockPos feet, Direction first,
+                                       Direction[] base, int dist) {
+        if (first != null && pathClear(mc, feet, first, dist)) {
+            return first;
+        }
+        for (Direction d : base) {
+            if (pathClear(mc, feet, d, dist)) {
+                return d;
             }
-            if (hazard(mc, af) || hazard(mc, ah) || hazard(mc, af.below())) {
-                continue;   // water/lava right there
-            }
-            return d;
         }
         return null;
+    }
+
+    /** True if the next {@code dist} blocks along {@code d} are free of lava/water. */
+    private static boolean pathClear(Minecraft mc, BlockPos feet, Direction d, int dist) {
+        for (int i = 1; i <= dist; i++) {
+            BlockPos af = feet.relative(d, i);
+            BlockPos ah = af.above();
+            if (lavaNear(mc, af, 2) || lavaNear(mc, ah, 2)) {
+                return false;
+            }
+            if (i == 1 && (hazard(mc, af) || hazard(mc, ah) || hazard(mc, af.below()))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Scan a box of half-size r around a position for lava — catches pockets before we dig in. */
