@@ -37,30 +37,26 @@ public class CycleaHud implements HudElement {
             return;
         }
 
-        int y = g.guiHeight() - 100;
-        g.fill(x - 3, y - 3, x + 208, y + 96, 0xAA000000);
+        int y = g.guiHeight() - 88;
+        g.fill(x - 3, y - 3, x + 208, y + 84, 0xAA000000);
 
-        g.text(font, "CYCLEA ▶ base radar", x, y, 0xFF55FFFF, true);
-        g.text(font, "Bases " + s.getBaseCount() + "   Chests≤" + s.getDeepMaxY()
-            + " " + s.getChestCount() + "   Shulkers " + s.getShulkerCount()
-            + "   Beacons " + s.getBeaconCount(), x, y + 12, 0xFFFFFFFF, true);
+        g.text(font, "CYCLEA ▶ base finder", x, y, 0xFF55FFFF, true);
+        g.text(font, "Chests≤20 " + s.getChestCount() + "   Shulkers " + s.getShulkerCount()
+            + "   Bases " + s.getBaseCount(), x, y + 12, 0xFFFFFFFF, true);
         g.text(font, "Players " + s.getPlayerCount() + "   Hostiles " + s.getHostileCount()
-            + "   Session bases " + s.getSessionBaseTotal(), x, y + 23, 0xFFB0B0B0, true);
+            + "   Session " + s.getSessionBaseTotal(), x, y + 23, 0xFFB0B0B0, true);
         g.text(font, "Target: " + s.getTarget().label, x, y + 36,
             0xFF000000 | s.getTarget().color, true);
 
         int nearColor = s.getNearestDist() >= 0 && s.getNearestDist() < 16 ? 0xFFFF4040 : 0xFFE0E0E0;
-        String nearest = s.getNearestLine().isEmpty() ? "scanning…" : s.getNearestLine();
-        g.text(font, nearest, x, y + 48, nearColor, true);
+        g.text(font, s.getNearestLine().isEmpty() ? "scanning…" : s.getNearestLine(),
+            x, y + 48, nearColor, true);
         if (!s.getNearestLine().isEmpty()) {
-            g.text(font, s.getBearing() + "   " + s.getVertical()
-                + (s.getNearestLootCount() > 0 ? "   loot~" + s.getNearestLootCount() : ""),
-                x, y + 60, 0xFFC0C0C0, true);
+            g.text(font, s.getBearing() + "   " + s.getVertical(), x, y + 60, 0xFFC0C0C0, true);
         }
-        g.text(font, "Richest base: " + s.getRichestSize() + " blocks", x, y + 72, 0xFFFFD060, true);
-        g.text(font, "[ on  ] cycle  - = deepY  \\ compact", x, y + 84, 0xFF808080, true);
+        g.text(font, "[ on   ] cycle   \\ compact   P pin", x, y + 72, 0xFF808080, true);
 
-        drawRadar(g, s, x + 168, y + 46, 30);
+        drawRadar(g, s, x + 168, y + 44, 28);
     }
 
     /** Little blip radar: player at center, targets as dots, north up. */

@@ -1,6 +1,7 @@
 package com.otto.cyclea.client;
 
 import com.otto.cyclea.CycleaState;
+import com.otto.cyclea.feature.MinimapBridge;
 import com.otto.cyclea.feature.TargetScanner;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -22,10 +23,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Cyclea entry point (v3). Registers keys + HUD, scans on a cadence, and builds
- * the full HUD snapshot: nearest target with heading/vertical/turn hint, radar
- * blips, richest base, loot counts, entity radar, plus the session log with
- * sound + chat + file export on newly discovered bases.
+ * Cyclea entry point. A base finder: chests (below Y{@value TargetScanner#CHEST_MAX_Y})
+ * plus shulkers (any level) clustered 3+ together = a base. Keeps the HUD/state
+ * updated, logs + pings + pins new bases, and pins them to Xaero with the Y level.
  */
 public class CycleaClient implements ClientModInitializer {
 
@@ -34,18 +34,15 @@ public class CycleaClient implements ClientModInitializer {
 
     private KeyMapping toggleKey;
     private KeyMapping cycleKey;
-    private KeyMapping yUpKey;
-    private KeyMapping yDownKey;
     private KeyMapping compactKey;
     private KeyMapping pinKey;
     private int tickCounter = 0;
+    private List<TargetScanner.Base> lastBases = List.of();
 
     @Override
     public void onInitializeClient() {
         toggleKey = reg("key.cyclea.toggle", GLFW.GLFW_KEY_LEFT_BRACKET);
         cycleKey = reg("key.cyclea.cycle", GLFW.GLFW_KEY_RIGHT_BRACKET);
-        yUpKey = reg("key.cyclea.yup", GLFW.GLFW_KEY_EQUAL);
-        yDownKey = reg("key.cyclea.ydown", GLFW.GLFW_KEY_MINUS);
         compactKey = reg("key.cyclea.compact", GLFW.GLFW_KEY_BACKSLASH);
         pinKey = reg("key.cyclea.pin", GLFW.GLFW_KEY_P);
 
@@ -72,26 +69,17 @@ public class CycleaClient implements ClientModInitializer {
             st.cycleTarget();
             say(mc, "§bCyclea target → §f" + st.getTarget().label);
         }
-        while (yUpKey.consumeClick()) {
-            st.adjustDeepMaxY(8);
-            say(mc, "§bCyclea deep-Y ≤ §f" + st.getDeepMaxY());
-        }
-        while (yDownKey.consumeClick()) {
-            st.adjustDeepMaxY(-8);
-            say(mc, "§bCyclea deep-Y ≤ §f" + st.getDeepMaxY());
-        }
         while (compactKey.consumeClick()) {
             st.toggleCompact();
         }
         while (pinKey.consumeClick()) {
-            int n = pushToMinimap(st.getSessionBases());
+            int n = pushToMinimap(lastBases);
             if (n > 0) {
-                say(mc, "§d📍 Pinned §f" + n + "§d base" + (n > 1 ? "s" : "")
-                    + " to your minimap");
-            } else if (!com.otto.cyclea.feature.MinimapBridge.available()) {
+                say(mc, "§d📍 Pinned §f" + n + "§d base" + (n > 1 ? "s" : "") + " to your minimap");
+            } else if (!MinimapBridge.available()) {
                 say(mc, "§7Cyclea: Xaero's Minimap not found — pins unavailable");
             } else {
-                say(mc, "§7Cyclea: no new bases to pin (all already on the map)");
+                say(mc, "§7Cyclea: no new bases to pin");
             }
         }
 
@@ -108,26 +96,26 @@ public class CycleaClient implements ClientModInitializer {
     private void update(Minecraft mc, CycleaState st) {
         TargetScanner.Scan scan = TargetScanner.scan(mc);
         st.setFound(scan.hits());
+        lastBases = scan.bases();
 
         BlockPos me = mc.player.blockPosition();
 
-        // session log + new-base alert (#6, #5, #12, #7)
         List<BlockPos> baseCenters = new ArrayList<>();
         int richest = 0;
-        for (TargetScanner.Cluster c : scan.baseClusters()) {
-            baseCenters.add(c.center());
-            richest = Math.max(richest, c.size());
+        for (TargetScanner.Base b : scan.bases()) {
+            baseCenters.add(b.center());
+            richest = Math.max(richest, b.total());
         }
+
         int fresh = st.recordBases(baseCenters);
         if (fresh > 0) {
             mc.player.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, 0.7f, 1.6f);
             say(mc, "§a✚ " + fresh + " new base" + (fresh > 1 ? "s" : "")
-                + " logged §7(session total " + st.getSessionBaseTotal() + ")");
+                + " found §7(session " + st.getSessionBaseTotal() + ")");
             exportFinds(st.getSessionBases());
-            pushToMinimap(baseCenters);   // auto-pin new bases to Xaero (if present)
+            pushToMinimap(scan.bases());
         }
 
-        // nearest target + its detail
         String nearestLine = "";
         String vertical = "";
         String bearing = "";
@@ -138,20 +126,21 @@ public class CycleaClient implements ClientModInitializer {
         if (!scan.hits().isEmpty()) {
             BlockPos best = nearest(me, scan.hits());
             nearestDist = (int) Math.sqrt(me.distSqr(best));
-            nearestLine = nearestDist + "m " + heading(best.getX() - me.getX(), best.getZ() - me.getZ())
-                + " (" + best.getX() + "," + best.getY() + "," + best.getZ() + ")";
-            int dy = best.getY() - me.getY();
-            vertical = dy > 3 ? "▲ +" + dy : dy < -3 ? "▼ " + dy : "● level";
+            vertical = vertical(best.getY() - me.getY());
             bearing = turnHint(mc, best.getX() - me.getX(), best.getZ() - me.getZ());
 
-            // loot count of the base nearest the player
-            for (TargetScanner.Cluster c : scan.baseClusters()) {
-                if (c.center().equals(best)) {
-                    nearestLoot = c.size();
-                    break;
-                }
+            if (st.getTarget() == CycleaState.Target.BASES) {
+                TargetScanner.Base b = baseAt(scan.bases(), best);
+                nearestLoot = b == null ? 0 : b.total();
+                nearestLine = (b == null ? "" : b.chests() + "c " + b.shulkers() + "s  ")
+                    + "Y" + best.getY() + "  " + nearestDist + "m "
+                    + heading(best.getX() - me.getX(), best.getZ() - me.getZ())
+                    + " (" + best.getX() + "," + best.getY() + "," + best.getZ() + ")";
+            } else {
+                nearestLine = nearestDist + "m " + heading(best.getX() - me.getX(), best.getZ() - me.getZ())
+                    + " (" + best.getX() + "," + best.getY() + "," + best.getZ() + ")";
             }
-            // radar blips (cap 48)
+
             for (BlockPos p : scan.hits()) {
                 blips.add(new int[]{p.getX() - me.getX(), p.getZ() - me.getZ()});
                 if (blips.size() >= 48) {
@@ -160,12 +149,24 @@ public class CycleaClient implements ClientModInitializer {
             }
         }
 
-        st.setSnapshot(scan.chests(), scan.shulkers(), baseCenters.size(), scan.beacons(),
+        st.setSnapshot(scan.chestsTotal(), scan.shulkersTotal(), baseCenters.size(), 0,
             scan.players(), scan.hostiles(), richest, nearestLoot, nearestDist,
             nearestLine, vertical, bearing, blips);
     }
 
-    /** Turn hint relative to where the player is facing. */
+    private static TargetScanner.Base baseAt(List<TargetScanner.Base> bases, BlockPos center) {
+        for (TargetScanner.Base b : bases) {
+            if (b.center().equals(center)) {
+                return b;
+            }
+        }
+        return null;
+    }
+
+    private static String vertical(int dy) {
+        return dy > 3 ? "▲ +" + dy : dy < -3 ? "▼ " + dy : "● level";
+    }
+
     private static String turnHint(Minecraft mc, int dx, int dz) {
         double targetYaw = Math.toDegrees(Math.atan2(-dx, dz));
         double rel = targetYaw - mc.player.getYRot(1.0f);
@@ -178,14 +179,12 @@ public class CycleaClient implements ClientModInitializer {
         if (Math.abs(rel) < 22) {
             return "▲ ahead";
         }
-        return rel > 0 ? "→ turn right " + (int) Math.abs(rel) + "°"
-            : "← turn left " + (int) Math.abs(rel) + "°";
+        return rel > 0 ? "→ right " + (int) Math.abs(rel) + "°" : "← left " + (int) Math.abs(rel) + "°";
     }
 
-    /** Push bases to Xaero's minimap, guarded so a missing Xaero can't crash us. */
-    private static int pushToMinimap(List<BlockPos> bases) {
+    private static int pushToMinimap(List<TargetScanner.Base> bases) {
         try {
-            return com.otto.cyclea.feature.MinimapBridge.pushBases(bases);
+            return MinimapBridge.pushBases(bases);
         } catch (Throwable t) {
             return 0;
         }
@@ -201,7 +200,7 @@ public class CycleaClient implements ClientModInitializer {
             }
             Files.write(file, lines);
         } catch (IOException ignored) {
-            // non-fatal; export is a convenience
+            // export is a convenience; never fatal
         }
     }
 

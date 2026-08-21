@@ -20,9 +20,8 @@ public final class CycleaState {
     }
 
     public enum Target {
-        BASES("Bases (cluster bomb)", 0xFF3860),
-        LOOT("Loot: chests + shulkers", 0x00E5FF),
-        SHULKERS("Shulkers (all levels)", 0xD070FF),
+        BASES("Bases — chest/shulker clusters", 0xFF3860),
+        CONTAINERS("Every chest & shulker", 0x00E5FF),
         SPAWNERS("Spawners & Vaults", 0xFFB300),
         CAVES("Caves", 0x8CFF66);
 
@@ -43,7 +42,6 @@ public final class CycleaState {
     private boolean compactHud = false;
     private Target target = Target.BASES;
     private int radius = 48;
-    private int deepMaxY = 20;                 // adjustable Y filter (#10)
     private final List<BlockPos> found = new ArrayList<>();
 
     // cumulative unique bases discovered this session (#6), keyed by 16-block grid
@@ -97,14 +95,6 @@ public final class CycleaState {
 
     public int getRadius() {
         return radius;
-    }
-
-    public int getDeepMaxY() {
-        return deepMaxY;
-    }
-
-    public void adjustDeepMaxY(int delta) {
-        deepMaxY = Math.max(-64, Math.min(320, deepMaxY + delta));
     }
 
     public synchronized List<BlockPos> getFound() {

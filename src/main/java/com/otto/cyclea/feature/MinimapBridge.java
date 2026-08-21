@@ -1,5 +1,6 @@
 package com.otto.cyclea.feature;
 
+import com.otto.cyclea.feature.TargetScanner;
 import net.minecraft.core.BlockPos;
 import xaero.common.XaeroMinimapSession;
 import xaero.common.minimap.waypoints.Waypoint;
@@ -35,21 +36,24 @@ public final class MinimapBridge {
 
     /**
      * Add each base as a waypoint (skipping any already present at that spot).
-     * Returns how many new waypoints were placed, or 0 if Xaero is unavailable.
+     * The waypoint name carries the Y level and the chest/shulker counts so it
+     * reads clearly on the map. Returns how many new waypoints were placed.
      */
-    public static int pushBases(List<BlockPos> bases) {
+    public static int pushBases(List<TargetScanner.Base> bases) {
         try {
             WaypointSet set = currentSet();
             if (set == null) {
                 return 0;
             }
             int added = 0;
-            for (BlockPos b : bases) {
+            for (TargetScanner.Base base : bases) {
+                BlockPos b = base.center();
                 if (hasWaypointAt(set, b)) {
                     continue;
                 }
-                set.add(new Waypoint(b.getX(), b.getY(), b.getZ(),
-                    "Cyclea Base " + b.getX() + "," + b.getZ(), "C", WaypointColor.RED));
+                String name = "Base Y" + b.getY() + " (" + base.chests() + "c "
+                    + base.shulkers() + "s)";
+                set.add(new Waypoint(b.getX(), b.getY(), b.getZ(), name, "B", WaypointColor.RED));
                 added++;
             }
             return added;

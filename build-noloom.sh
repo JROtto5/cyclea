@@ -18,6 +18,6 @@ CP="$MC:$LIBS:$FAPI"
 rm -rf out && mkdir -p out
 "$JAVA_BIN/javac" --release 21 -cp "$CP" -d out $(find src/main/java -name "*.java")
 cp -r src/main/resources/* out/
-sed -i "s/\${version}/3.1.1/" out/fabric.mod.json
-"$JAVA_BIN/jar" --create --file cyclea-3.1.1.jar -C out .
-echo "built: cyclea-3.1.1.jar  (copy into $MCROOT/mods/)"
+sed -i "s/\${version}/3.2.0/" out/fabric.mod.json
+"$JAVA_BIN/jar" --create --file cyclea-3.2.0.jar -C out .
+echo "built: cyclea-3.2.0.jar  (copy into $MCROOT/mods/)"
