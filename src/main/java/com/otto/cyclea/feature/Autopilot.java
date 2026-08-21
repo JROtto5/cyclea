@@ -444,10 +444,7 @@ public final class Autopilot {
             if (old != null && !isTrapdoor(mc.level.getBlockState(old))) {
                 placedTrapdoors.pollFirst();   // already recovered
             } else if (old != null && old.distManhattan(feet) > 3) {
-                key(mc, mc.options.keyUp, false);
-                key(mc, mc.options.keySprint, false);
-                aimAtFast(player, center(old));
-                key(mc, mc.options.keyAttack, lookingAt(mc, old));
+                swingAt(mc, old);
                 return;   // break it to pick the trapdoor back up
             }
             BlockPos spot = feet.above().relative(dir.getOpposite());   // head-level, behind (air)
@@ -492,44 +489,54 @@ public final class Autopilot {
             return;   // then feet
         }
 
-        if (mining != null && !passable(mc, mining) && !hazard(mc, mining)
-            && !hasHazardNeighbor(mc, mining) && !isUnbreakable(mc.level.getBlockState(mining))) {
-            selectToolFor(mc, mc.level.getBlockState(mining));
-            key(mc, mc.options.keyUp, false);
-            key(mc, mc.options.keySprint, false);
-            aimAtFast(player, center(mining));
-            key(mc, mc.options.keyAttack, lookingAt(mc, mining));
+        if (mining != null && canMine(mc, mining)) {
+            swingAt(mc, mining);
             return;
         }
         mining = null;
 
-        // grab any ore exposed in the tunnel walls first (that's the point of mining)
+        // grab any ore exposed right next to us first
         BlockPos target = adjacentOre(mc, feet);
-        // else clear the way: head, then feet, then (if too shallow) descend
+
+        // chasing an ore that's above/below? dig a 3D staircase toward it (mine up
+        // and hop, or dig down) so ore at any height is actually reachable.
+        if (target == null && oreGoal != null) {
+            int dy = oreGoal.getY() - feet.getY();
+            if (dy >= 1) {
+                BlockPos up = feet.above(2);   // block above our head
+                if (canMine(mc, up)) {
+                    target = up;
+                } else if (passable(mc, up)) {
+                    jumpTicks = 3;             // already clear → hop up toward it
+                }
+            } else if (dy <= -1) {
+                BlockPos down = feet.below();
+                if (canMine(mc, down)) {
+                    target = down;
+                }
+            }
+        }
+
+        // else clear the way forward: head, then feet, then (if too shallow) descend
         if (target == null) {
             if (!passable(mc, aheadHead)) {
                 target = aheadHead;
             } else if (!passable(mc, aheadFeet)) {
                 target = aheadFeet;
-            } else if (feet.getY() > targetY && !passable(mc, aheadFeet.below())
-                && !hazard(mc, aheadFeet.below()) && !hasHazardNeighbor(mc, aheadFeet.below())
-                && !isUnbreakable(mc.level.getBlockState(aheadFeet.below()))) {
+            } else if (feet.getY() > targetY && canMine(mc, aheadFeet.below())) {
                 target = aheadFeet.below();   // staircase down toward Y-59 (never into bedrock)
             }
         }
 
         if (target != null) {
             mining = target;
-            selectToolFor(mc, mc.level.getBlockState(target));
-            key(mc, mc.options.keyUp, false);
-            key(mc, mc.options.keySprint, false);
-            aimAtFast(player, center(target));
-            key(mc, mc.options.keyAttack, lookingAt(mc, target));
+            swingAt(mc, target);
         } else {
             // path clear: walk smooth and straight (body stays on the travel line);
             // glancing is mostly pitch (harmless) + a small yaw so it doesn't weave.
             key(mc, mc.options.keyAttack, false);
             mc.gameMode.stopDestroyBlock();
+            breakingPos = null;
             float yawAmp = CycleaConfig.get().glanceYawAmp();
             float pitchAmp = CycleaConfig.get().glancePitchAmp();
             if (yawAmp <= 0f) {
@@ -749,18 +756,59 @@ public final class Autopilot {
         return false;
     }
 
-    /** If a mineable solid block occupies {@code pos}, dig it out now. @return true if mining. */
-    private boolean mineHere(Minecraft mc, BlockPos pos) {
-        if (passable(mc, pos) || hazard(mc, pos) || hasHazardNeighbor(mc, pos)
-            || isUnbreakable(mc.level.getBlockState(pos))) {
-            return false;
-        }
-        mining = pos;
+    private BlockPos breakingPos = null;   // block we're actively breaking (start/continue)
+
+    /** A block we may dig: solid, safe, not unbreakable, not given-up-on. */
+    private boolean canMine(Minecraft mc, BlockPos p) {
+        return !passable(mc, p) && !hazard(mc, p) && !hasHazardNeighbor(mc, p)
+            && !isUnbreakable(mc.level.getBlockState(p)) && !oreBlacklist.contains(p.asLong());
+    }
+
+    /**
+     * Actually BREAK the block — aim at it AND drive the game's own destroy calls
+     * (start then continue) plus the swing animation, so it mines regardless of a
+     * pixel-perfect crosshair. This is what makes it swing instead of just staring.
+     */
+    private void swingAt(Minecraft mc, BlockPos pos) {
         selectToolFor(mc, mc.level.getBlockState(pos));
         key(mc, mc.options.keyUp, false);
         key(mc, mc.options.keySprint, false);
         aimAtFast(mc.player, center(pos));
-        key(mc, mc.options.keyAttack, lookingAt(mc, pos));
+        Direction face = faceToward(mc, pos);
+        if (!pos.equals(breakingPos)) {
+            mc.gameMode.startDestroyBlock(pos, face);
+            breakingPos = pos;
+        } else {
+            mc.gameMode.continueDestroyBlock(pos, face);
+        }
+        mc.player.swing(InteractionHand.MAIN_HAND);
+    }
+
+    /** A face of {@code pos} that's open to air (prefer the one toward the player). */
+    private Direction faceToward(Minecraft mc, BlockPos pos) {
+        Direction best = Direction.UP;
+        double bestDot = -2;
+        Vec3 toPlayer = mc.player.getEyePosition().subtract(Vec3.atCenterOf(pos)).normalize();
+        for (Direction d : Direction.values()) {
+            if (!passable(mc, pos.relative(d))) {
+                continue;   // that face is buried
+            }
+            double dot = d.getStepX() * toPlayer.x + d.getStepY() * toPlayer.y + d.getStepZ() * toPlayer.z;
+            if (dot > bestDot) {
+                bestDot = dot;
+                best = d;
+            }
+        }
+        return best;
+    }
+
+    /** If a mineable solid block occupies {@code pos}, dig it out now. @return true if mining. */
+    private boolean mineHere(Minecraft mc, BlockPos pos) {
+        if (!canMine(mc, pos)) {
+            return false;
+        }
+        mining = pos;
+        swingAt(mc, pos);
         return true;
     }
 
@@ -1058,6 +1106,7 @@ public final class Autopilot {
         key(mc, mc.options.keyJump, false);
         key(mc, mc.options.keySprint, false);
         mc.gameMode.stopDestroyBlock();
+        breakingPos = null;
         eating = false;
     }
 
