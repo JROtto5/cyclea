@@ -66,6 +66,7 @@ public final class Autopilot {
     private int fightCd = 0;              // attack cooldown ticks
     private BlockPos oreGoal = null;      // an ore we're detouring to dig out
     private int oreScanTick = 0;
+    private final java.util.ArrayDeque<BlockPos> placedTrapdoors = new java.util.ArrayDeque<>();
     private double lastProgX = Double.NaN;   // anti-stuck progress tracking
     private double lastProgZ = Double.NaN;
     private int stuckTicks = 0;
@@ -489,9 +490,23 @@ public final class Autopilot {
                 stop(mc, "§edrop ahead, no blocks to bridge — need you");
                 return;
             }
-            // 1×1 trapdoor mode: cap the tunnel with a trapdoor above head for a sprint-lane
-            if (CycleaConfig.get().oneByOne && mc.level.getBlockState(feet.above(2)).isAir()) {
-                place(mc, feet.above(2), "trapdoor");
+            // 1×1 trapdoor lane: place a trapdoor ceiling ahead, and MINE BACK the
+            // one left behind so a couple of trapdoors leapfrog forward forever.
+            if (CycleaConfig.get().oneByOne) {
+                BlockPos old = placedTrapdoors.peekFirst();
+                if (old != null && !isTrapdoor(mc.level.getBlockState(old))) {
+                    placedTrapdoors.pollFirst();   // already broken/recovered
+                } else if (old != null && old.distManhattan(feet) > 3) {
+                    key(mc, mc.options.keyUp, false);
+                    key(mc, mc.options.keySprint, false);
+                    aimAtFast(player, center(old));
+                    key(mc, mc.options.keyAttack, lookingAt(mc, old));
+                    return;   // breaking it to pick the trapdoor back up
+                }
+                if (mc.level.getBlockState(feet.above(2)).isAir()
+                    && place(mc, feet.above(2), "trapdoor")) {
+                    placedTrapdoors.addLast(feet.above(2).immutable());
+                }
             }
             // walk (and sprint) while pointed down the tunnel — tighter tolerance = straighter
             boolean facing = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 30f;
@@ -828,6 +843,10 @@ public final class Autopilot {
     private static boolean isOre(BlockState st) {
         String path = BuiltInRegistries.BLOCK.getKey(st.getBlock()).getPath();
         return path.endsWith("_ore") || path.equals("ancient_debris");
+    }
+
+    private static boolean isTrapdoor(BlockState st) {
+        return BuiltInRegistries.BLOCK.getKey(st.getBlock()).getPath().endsWith("trapdoor");
     }
 
     private static boolean wantedOre(Minecraft mc, BlockPos p) {
