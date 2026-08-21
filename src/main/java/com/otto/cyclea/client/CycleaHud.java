@@ -25,19 +25,20 @@ public class CycleaHud implements HudElement {
             return;
         }
         Font font = mc.font;
+        // Bottom-left, clear of a top-corner minimap.
         int x = 4;
-        int y = 4;
 
         if (s.isCompact()) {
-            g.fill(x - 3, y - 3, x + 168, y + 26, 0xAA000000);
+            int y = g.guiHeight() - 24;
+            g.fill(x - 3, y - 3, x + 168, y + 22, 0xAA000000);
             g.text(font, "CYCLEA ▶ " + s.getTarget().label, x, y, 0xFF55FFFF, true);
             g.text(font, "B:" + s.getBaseCount() + "  C:" + s.getChestCount()
-                + "  S:" + s.getShulkerCount() + "  " + proximity(s), x, y + 12, 0xFFFFFFFF, true);
+                + "  S:" + s.getShulkerCount() + "  " + proximity(s), x, y + 11, 0xFFFFFFFF, true);
             return;
         }
 
-        int panelBottom = y + 96;
-        g.fill(x - 3, y - 3, x + 208, panelBottom, 0xAA000000);
+        int y = g.guiHeight() - 100;
+        g.fill(x - 3, y - 3, x + 208, y + 96, 0xAA000000);
 
         g.text(font, "CYCLEA ▶ base radar", x, y, 0xFF55FFFF, true);
         g.text(font, "Bases " + s.getBaseCount() + "   Chests≤" + s.getDeepMaxY()
