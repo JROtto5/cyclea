@@ -444,7 +444,8 @@ public final class Autopilot {
             return;
         }
 
-        // 4b) anti-stuck: if we're not making progress, unstick — then bail if truly stuck
+        // 4b) anti-stuck: it NEVER gives up — it escalates (shake → tower up →
+        //     redirect) until it frees itself, so it should never need you.
         if (Double.isNaN(lastProgX)) {
             lastProgX = player.getX();
             lastProgZ = player.getZ();
@@ -456,18 +457,35 @@ public final class Autopilot {
         } else {
             stuckTicks++;
         }
-        if (stuckTicks == 60) {           // ~3s no progress → shake it loose
+        if (stuckTicks == 40) {           // step 1: shake loose — drop targets, hop
             mining = null;
             if (oreGoal != null) {
-                oreBlacklist.add(oreGoal.asLong());   // this ore caused the jam — skip it for good
+                oreBlacklist.add(oreGoal.asLong());
                 oreGoal = null;
             }
             detourTicks = 0;
-            jumpTicks = 8;
+            jumpTicks = 6;
         }
-        if (stuckTicks > 220) {           // ~11s → give up, hand off
-            stop(mc, "§estuck — need you (clear the area, then press O)");
-            return;
+        if (stuckTicks >= 90) {           // step 2: tower straight UP to escape the pocket
+            BlockPos up = player.blockPosition().above(2);
+            if (canMine(mc, up)) {
+                mining = up;
+                swingAt(mc, up);
+                jumpTicks = 4;
+                return;
+            }
+            if (passable(mc, up)) {
+                jumpTicks = 4;             // clear above → keep hopping up out of it
+            }
+        }
+        if (stuckTicks >= 170) {          // step 3: give up on THIS route, not the job —
+            startX = player.getX();       // re-anchor and head a different way, then retry
+            startZ = player.getZ();
+            axisX = !axisX;
+            detourDir = null;
+            detourTicks = 0;
+            oreGoal = null;
+            stuckTicks = 0;               // fresh attempt — never hard-stop
         }
         if (jumpTicks > 0) {
             key(mc, mc.options.keyJump, true);
