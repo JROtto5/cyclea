@@ -65,6 +65,10 @@ public final class Autopilot {
     private int fightCd = 0;              // attack cooldown ticks
     private BlockPos oreGoal = null;      // an ore we're detouring to dig out
     private int oreScanTick = 0;
+    private double lastProgX = Double.NaN;   // anti-stuck progress tracking
+    private double lastProgZ = Double.NaN;
+    private int stuckTicks = 0;
+    private int jumpTicks = 0;
     private double blocksTraveled = 0;    // session stats
     private long sessionStart = 0;
     private double lastX = Double.NaN;
@@ -284,6 +288,35 @@ public final class Autopilot {
             return;
         }
 
+        // 4b) anti-stuck: if we're not making progress, unstick — then bail if truly stuck
+        if (Double.isNaN(lastProgX)) {
+            lastProgX = player.getX();
+            lastProgZ = player.getZ();
+        }
+        if (Math.hypot(player.getX() - lastProgX, player.getZ() - lastProgZ) > 0.6) {
+            lastProgX = player.getX();
+            lastProgZ = player.getZ();
+            stuckTicks = 0;
+        } else {
+            stuckTicks++;
+        }
+        if (stuckTicks == 60) {           // ~3s no progress → shake it loose
+            mining = null;
+            oreGoal = null;
+            detourTicks = 0;
+            jumpTicks = 8;
+        }
+        if (stuckTicks > 220) {           // ~11s → give up, hand off
+            stop(mc, "§estuck — need you (clear the area, then press O)");
+            return;
+        }
+        if (jumpTicks > 0) {
+            key(mc, mc.options.keyJump, true);
+            jumpTicks--;
+        } else {
+            key(mc, mc.options.keyJump, false);
+        }
+
         // 5) travel direction toward the target
         double dx = targetX - player.getX();
         double dz = targetZ - player.getZ();
@@ -311,9 +344,10 @@ public final class Autopilot {
             stop(mc, "reached spawn area");
             return;
         }
-        // ore-seek: detour to dig out a configured ore if one is nearby
+        // ore-seek: detour to dig out configured ores, clearing the whole vein
         if (oreGoal != null && !wantedOre(mc, oreGoal)) {
-            oreGoal = null;   // mined, or no longer wanted
+            // seed ore mined — keep going if the vein continues nearby
+            oreGoal = findWantedOre(mc, player.blockPosition(), 4);
         }
         if (oreGoal == null && CycleaConfig.get().oreSeekLevel > 0 && ++oreScanTick >= 8) {
             oreScanTick = 0;
@@ -383,6 +417,7 @@ public final class Autopilot {
             && !hasHazardNeighbor(mc, mining) && !isUnbreakable(mc.level.getBlockState(mining))) {
             selectToolFor(mc, mc.level.getBlockState(mining));
             key(mc, mc.options.keyUp, false);
+            key(mc, mc.options.keySprint, false);
             aimAt(player, center(mining));
             key(mc, mc.options.keyAttack, lookingAt(mc, mining));
             return;
@@ -408,33 +443,34 @@ public final class Autopilot {
             mining = target;
             selectToolFor(mc, mc.level.getBlockState(target));
             key(mc, mc.options.keyUp, false);
+            key(mc, mc.options.keySprint, false);
             aimAt(player, center(target));
             key(mc, mc.options.keyAttack, lookingAt(mc, target));
         } else {
-            // path clear: walk, glancing around like a person scanning the tunnel
+            // path clear: walk smooth and straight (body stays on the travel line);
+            // glancing is mostly pitch (harmless) + a small yaw so it doesn't weave.
             key(mc, mc.options.keyAttack, false);
             mc.gameMode.stopDestroyBlock();
             float yawAmp = CycleaConfig.get().glanceYawAmp();
             float pitchAmp = CycleaConfig.get().glancePitchAmp();
             if (yawAmp <= 0f) {
-                aim(player, travelYaw, 0f);   // look-around disabled in config
+                aim(player, travelYaw, 0f);
             } else {
                 if (--glanceTimer <= 0) {
-                    boolean flick = rng.nextFloat() < 0.35f;
-                    glanceYaw = (rng.nextFloat() - 0.5f) * (flick ? yawAmp * 1.7f : yawAmp);
-                    glancePitch = (rng.nextFloat() - 0.5f) * (flick ? pitchAmp * 1.5f : pitchAmp);
-                    glanceTimer = flick ? 6 + rng.nextInt(10) : 12 + rng.nextInt(30);
+                    glanceYaw = (rng.nextFloat() - 0.5f) * (yawAmp * 0.35f);   // small — keep walking straight
+                    glancePitch = (rng.nextFloat() - 0.5f) * pitchAmp;         // full — doesn't curve the path
+                    glanceTimer = 14 + rng.nextInt(30);
                 }
-                float flickSpeed = Math.abs(glanceYaw) > 22f ? 16f : CycleaConfig.get().turnMax();
-                aim(player, travelYaw + glanceYaw, glancePitch, flickSpeed);
+                aim(player, travelYaw + glanceYaw, glancePitch);
             }
             if (passable(mc, aheadFeet.below()) && passable(mc, aheadFeet.below().below())) {
                 stop(mc, "§edrop ahead (avoiding a fall)");
                 return;
             }
-            // keep walking as long as we're roughly pointed down the tunnel
-            boolean facing = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 42f;
+            // walk (and sprint) while pointed down the tunnel — tighter tolerance = straighter
+            boolean facing = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 30f;
             key(mc, mc.options.keyUp, facing);
+            key(mc, mc.options.keySprint, facing);
         }
     }
 
@@ -664,19 +700,20 @@ public final class Autopilot {
         eatingTicks = 0;
     }
 
-    /** Nearest ore block adjacent to the player's feet/head — grab it while passing. */
+    /** Nearest ore within reach of the player (incl. diagonals) — grab it while passing. */
     private static BlockPos adjacentOre(Minecraft mc, BlockPos feet) {
-        BlockPos head = feet.above();
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
-        for (BlockPos base : new BlockPos[]{feet, head}) {
-            for (Direction d : Direction.values()) {
-                BlockPos p = base.relative(d);
-                if (isOre(mc.level.getBlockState(p)) && !hasHazardNeighbor(mc, p)) {
-                    double dist = p.distSqr(feet);
-                    if (dist < bestD) {
-                        bestD = dist;
-                        best = p;
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 2; dy++) {      // feet level up through head+1
+                for (int dz = -1; dz <= 1; dz++) {
+                    BlockPos p = feet.offset(dx, dy, dz);
+                    if (isOre(mc.level.getBlockState(p)) && !hasHazardNeighbor(mc, p)) {
+                        double dist = p.distSqr(feet);
+                        if (dist < bestD) {
+                            bestD = dist;
+                            best = p;
+                        }
                     }
                 }
             }
@@ -726,12 +763,20 @@ public final class Autopilot {
             || p.equals("grass_block") || p.equals("farmland") || p.equals("dirt_path");
     }
 
-    /** Pick the right tool for a block: shovel for soft ground, pickaxe otherwise. */
+    private static boolean isAxeBlock(BlockState st) {
+        String p = BuiltInRegistries.BLOCK.getKey(st.getBlock()).getPath();
+        return p.contains("log") || p.contains("wood") || p.contains("planks")
+            || p.contains("stem") || p.contains("hyphae") || p.contains("fence")
+            || p.contains("barrel") || p.contains("chest") || p.contains("bookshelf")
+            || p.contains("crafting_table") || p.contains("mushroom_block");
+    }
+
+    /** Pick the right tool: shovel for soft ground, axe for wood, pickaxe otherwise. */
     private void selectToolFor(Minecraft mc, BlockState st) {
         Inventory inv = mc.player.getInventory();
-        String want = isShovelBlock(st) ? "shovel" : "pickaxe";
+        String want = isShovelBlock(st) ? "shovel" : isAxeBlock(st) ? "axe" : "pickaxe";
         int slot = findHotbar(inv, s -> tool(s, want) && !nearlyBroken(s));
-        if (slot < 0 && want.equals("shovel")) {
+        if (slot < 0 && !want.equals("pickaxe")) {
             slot = findHotbar(inv, s -> tool(s, "pickaxe") && !nearlyBroken(s));   // fallback
         }
         if (slot >= 0 && slot != inv.getSelectedSlot()) {
@@ -823,6 +868,7 @@ public final class Autopilot {
         key(mc, mc.options.keyAttack, false);
         key(mc, mc.options.keyUse, false);
         key(mc, mc.options.keyJump, false);
+        key(mc, mc.options.keySprint, false);
         mc.gameMode.stopDestroyBlock();
         eating = false;
     }
