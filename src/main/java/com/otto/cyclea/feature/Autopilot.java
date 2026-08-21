@@ -401,7 +401,13 @@ public final class Autopilot {
         //    direction, then the other axis, then sidesteps. Only halt if boxed in.
         Direction dir = chooseSafeDir(mc, feet, primary, secondary);
         if (dir == null) {
-            stop(mc, "§cboxed in by lava/water — need you");
+            // horizontally boxed in — tunnel straight UP to find a way out (tower up)
+            BlockPos above = feet.above(2);   // the block above our head
+            if (mineHere(mc, above)) {
+                jumpTicks = 4;   // hop up into the space as it clears
+                return;
+            }
+            stop(mc, "§cfully boxed in (lava/water/bedrock) — need you");
             return;
         }
         if (dir != primary) {
@@ -427,7 +433,7 @@ public final class Autopilot {
             selectToolFor(mc, mc.level.getBlockState(mining));
             key(mc, mc.options.keyUp, false);
             key(mc, mc.options.keySprint, false);
-            aimAt(player, center(mining));
+            aimAtFast(player, center(mining));
             key(mc, mc.options.keyAttack, lookingAt(mc, mining));
             return;
         }
@@ -453,7 +459,7 @@ public final class Autopilot {
             selectToolFor(mc, mc.level.getBlockState(target));
             key(mc, mc.options.keyUp, false);
             key(mc, mc.options.keySprint, false);
-            aimAt(player, center(target));
+            aimAtFast(player, center(target));
             key(mc, mc.options.keyAttack, lookingAt(mc, target));
         } else {
             // path clear: walk smooth and straight (body stays on the travel line);
@@ -605,6 +611,12 @@ public final class Autopilot {
 
     /** Aim smoothly at a world point (block center). */
     private void aimAt(net.minecraft.client.player.LocalPlayer p, Vec3 t) {
+        aimAt(p, t, CycleaConfig.get().turnMax());
+    }
+
+    /** Lock onto a block FAST (for mining): snap up to 40°/tick with no easing or
+     *  drift, so the crosshair lands on it in 1–3 ticks and we actually swing. */
+    private void aimAtFast(net.minecraft.client.player.LocalPlayer p, Vec3 t) {
         Vec3 eye = p.getEyePosition();
         double d0 = t.x - eye.x;
         double d1 = t.y - eye.y;
@@ -612,7 +624,21 @@ public final class Autopilot {
         double dxz = Math.sqrt(d0 * d0 + d2 * d2);
         float yaw = (float) (Math.toDegrees(Math.atan2(d2, d0)) - 90.0);
         float pitch = (float) (-Math.toDegrees(Math.atan2(d1, dxz)));
-        aim(p, yaw, pitch);
+        float dyaw = Mth.clamp(Mth.wrapDegrees(yaw - p.getYRot()), -40f, 40f);
+        float dpitch = Mth.clamp(pitch - p.getXRot(), -40f, 40f);
+        p.setYRot(p.getYRot() + dyaw);
+        p.setXRot(Mth.clamp(p.getXRot() + dpitch, -90f, 90f));
+    }
+
+    private void aimAt(net.minecraft.client.player.LocalPlayer p, Vec3 t, float speed) {
+        Vec3 eye = p.getEyePosition();
+        double d0 = t.x - eye.x;
+        double d1 = t.y - eye.y;
+        double d2 = t.z - eye.z;
+        double dxz = Math.sqrt(d0 * d0 + d2 * d2);
+        float yaw = (float) (Math.toDegrees(Math.atan2(d2, d0)) - 90.0);
+        float pitch = (float) (-Math.toDegrees(Math.atan2(d1, dxz)));
+        aim(p, yaw, pitch, speed);
     }
 
     /** If a mineable solid block occupies {@code pos}, dig it out now. @return true if mining. */
@@ -625,7 +651,7 @@ public final class Autopilot {
         selectToolFor(mc, mc.level.getBlockState(pos));
         key(mc, mc.options.keyUp, false);
         key(mc, mc.options.keySprint, false);
-        aimAt(mc.player, center(pos));
+        aimAtFast(mc.player, center(pos));
         key(mc, mc.options.keyAttack, lookingAt(mc, pos));
         return true;
     }
