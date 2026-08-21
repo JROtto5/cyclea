@@ -68,6 +68,8 @@ public final class Autopilot {
     private int oreScanTick = 0;
     private int oreGoalTicks = 0;         // how long we've chased the current ore
     private final java.util.HashSet<Long> oreBlacklist = new java.util.HashSet<>();
+    private int mineTicks = 0;            // how long we've been on the current mining target
+    private long lastMiningKey = 0;
     private final java.util.ArrayDeque<BlockPos> placedTrapdoors = new java.util.ArrayDeque<>();
     private double lastProgX = Double.NaN;   // anti-stuck progress tracking
     private double lastProgZ = Double.NaN;
@@ -457,6 +459,30 @@ public final class Autopilot {
 
         // 7) if we're already committed to a block, keep on it until it's gone
         //    (holding one target is what keeps the camera steady instead of jerking).
+        // if we've been on one mining target too long (can't reach or break it),
+        // blacklist it and drop it — this is what stops the "stare at a diamond
+        // forever" freeze, whatever the cause.
+        if (mining != null) {
+            long k = mining.asLong();
+            if (k == lastMiningKey) {
+                mineTicks++;
+            } else {
+                lastMiningKey = k;
+                mineTicks = 0;
+            }
+            if (mineTicks > 40 && !passable(mc, mining)) {
+                oreBlacklist.add(k);
+                if (oreBlacklist.size() > 256) {
+                    oreBlacklist.clear();
+                }
+                mining = null;
+                mineTicks = 0;
+                oreGoal = null;
+            }
+        } else {
+            mineTicks = 0;
+        }
+
         // TOP PRIORITY: clear anything that fell/exists in our own head or feet
         // (gravel & sand avalanche as we dig) so we never suffocate or jam.
         if (mineHere(mc, feet.above())) {
@@ -838,12 +864,15 @@ public final class Autopilot {
      * mineable. Ores behind a wall are reached by digging to them (the detour),
      * never by swinging through the wall.
      */
-    private static BlockPos adjacentOre(Minecraft mc, BlockPos feet) {
+    private BlockPos adjacentOre(Minecraft mc, BlockPos feet) {
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
         for (BlockPos base : new BlockPos[]{feet, feet.above()}) {
             for (Direction d : Direction.values()) {
                 BlockPos p = base.relative(d);
+                if (oreBlacklist.contains(p.asLong())) {
+                    continue;   // gave up on this one — don't re-grab it
+                }
                 String path = BuiltInRegistries.BLOCK.getKey(
                     mc.level.getBlockState(p).getBlock()).getPath();
                 if (CycleaConfig.get().wantsOre(path) && !hasHazardNeighbor(mc, p)) {
