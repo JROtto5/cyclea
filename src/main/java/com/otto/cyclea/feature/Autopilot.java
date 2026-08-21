@@ -212,6 +212,7 @@ public final class Autopilot {
     public boolean toggle(Minecraft mc) {
         active = !active;
         if (active) {
+            resetRunState();   // clean slate — no stale counters from the last run can freeze it
             approaching = false;
             if (mc.player != null) {
                 // if the bot handed off and you took over, log how you helped
@@ -231,6 +232,37 @@ public final class Autopilot {
             releaseAll(mc);
         }
         return active;
+    }
+
+    /** Clear all transient per-run state so a fresh engage never inherits a stale
+     *  counter (a leftover stuckTicks / manualPause / mining target would freeze it). */
+    private void resetRunState() {
+        mining = null;
+        breakingPos = null;
+        oreGoal = null;
+        oreGoalTicks = 0;
+        oreScanTick = 0;
+        oreBlacklist.clear();
+        mineTicks = 0;
+        lastMiningKey = 0;
+        detourDir = null;
+        detourTicks = 0;
+        path = null;
+        pathIndex = 0;
+        fightCd = 0;
+        eating = false;
+        eatingTicks = 0;
+        axisX = false;
+        glanceTimer = 0;
+        placedTrapdoors.clear();
+        lastProgX = Double.NaN;
+        lastProgZ = Double.NaN;
+        stuckTicks = 0;
+        jumpTicks = 0;
+        botYaw = Float.NaN;
+        manualPauseTicks = 0;
+        paceCounter = 0;
+        scanTick = 0;
     }
 
     public void stop(Minecraft mc, String reason) {
