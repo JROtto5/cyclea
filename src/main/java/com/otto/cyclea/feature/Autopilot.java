@@ -724,20 +724,23 @@ public final class Autopilot {
         eatingTicks = 0;
     }
 
-    /** Nearest ore within reach of the player (incl. diagonals) — grab it while passing. */
+    /**
+     * Nearest ore that is FACE-adjacent to the player (feet or head) — i.e.
+     * directly exposed to the air the player stands in, so it's actually
+     * mineable. Ores behind a wall are reached by digging to them (the detour),
+     * never by swinging through the wall.
+     */
     private static BlockPos adjacentOre(Minecraft mc, BlockPos feet) {
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 2; dy++) {      // feet level up through head+1
-                for (int dz = -1; dz <= 1; dz++) {
-                    BlockPos p = feet.offset(dx, dy, dz);
-                    if (isOre(mc.level.getBlockState(p)) && !hasHazardNeighbor(mc, p)) {
-                        double dist = p.distSqr(feet);
-                        if (dist < bestD) {
-                            bestD = dist;
-                            best = p;
-                        }
+        for (BlockPos base : new BlockPos[]{feet, feet.above()}) {
+            for (Direction d : Direction.values()) {
+                BlockPos p = base.relative(d);
+                if (isOre(mc.level.getBlockState(p)) && !hasHazardNeighbor(mc, p)) {
+                    double dist = p.distSqr(feet);
+                    if (dist < bestD) {
+                        bestD = dist;
+                        best = p;
                     }
                 }
             }
