@@ -41,6 +41,12 @@ public class CycleaConfigScreen extends Screen {
             c.cycleSweepStep();
             b.setMessage(sweepMsg());
         }).bounds(x, y, w, h).build());
+        y += 26;
+
+        addRenderableWidget(Button.builder(oreMsg(), b -> {
+            c.cycleOreSeek();
+            b.setMessage(oreMsg());
+        }).bounds(x, y, w, h).build());
         y += 40;
 
         addRenderableWidget(Button.builder(Component.literal("Done"), b -> this.onClose())
@@ -57,6 +63,10 @@ public class CycleaConfigScreen extends Screen {
 
     private Component sweepMsg() {
         return Component.literal("Sweep spacing: " + CycleaConfig.get().sweepStep + " blocks");
+    }
+
+    private Component oreMsg() {
+        return Component.literal("Detour for ores: " + CycleaConfig.get().oreSeekLabel());
     }
 
     @Override

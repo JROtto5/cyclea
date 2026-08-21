@@ -29,6 +29,41 @@ public final class CycleaConfig {
     public int sweepStep = 48;
     // chest detection depth cap
     public int chestMaxY = 20;
+    // 0 = off, 1 = diamonds+debris, 2 = + emerald/gold, 3 = all ores
+    public int oreSeekLevel = 1;
+
+    /** Should the autopilot detour to dig this ore (by block path)? */
+    public boolean wantsOre(String path) {
+        if (oreSeekLevel == 0) {
+            return false;
+        }
+        boolean ore = path.endsWith("_ore") || path.equals("ancient_debris");
+        if (!ore) {
+            return false;
+        }
+        if (oreSeekLevel >= 3) {
+            return true;
+        }
+        boolean diamond = path.contains("diamond") || path.equals("ancient_debris");
+        if (oreSeekLevel == 1) {
+            return diamond;
+        }
+        return diamond || path.contains("emerald") || path.contains("gold");
+    }
+
+    public String oreSeekLabel() {
+        return switch (oreSeekLevel) {
+            case 0 -> "Off";
+            case 2 -> "Rare (diamond/emerald/gold)";
+            case 3 -> "All ores";
+            default -> "Diamonds + debris";
+        };
+    }
+
+    public void cycleOreSeek() {
+        oreSeekLevel = (oreSeekLevel + 1) % 4;
+        save();
+    }
 
     private CycleaConfig() {
     }
@@ -117,6 +152,7 @@ public final class CycleaConfig {
                 glanceLevel = Integer.parseInt(p.getProperty("glanceLevel", "1"));
                 sweepStep = Integer.parseInt(p.getProperty("sweepStep", "48"));
                 chestMaxY = Integer.parseInt(p.getProperty("chestMaxY", "20"));
+                oreSeekLevel = Integer.parseInt(p.getProperty("oreSeekLevel", "1"));
             }
         } catch (Exception ignored) {
             // defaults are fine
@@ -129,6 +165,7 @@ public final class CycleaConfig {
         p.setProperty("glanceLevel", Integer.toString(glanceLevel));
         p.setProperty("sweepStep", Integer.toString(sweepStep));
         p.setProperty("chestMaxY", Integer.toString(chestMaxY));
+        p.setProperty("oreSeekLevel", Integer.toString(oreSeekLevel));
         try (OutputStream out = Files.newOutputStream(file())) {
             p.store(out, "Cyclea config");
         } catch (IOException ignored) {

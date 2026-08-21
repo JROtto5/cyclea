@@ -63,6 +63,8 @@ public final class Autopilot {
     private List<BlockPos> path = null;   // A* route to the base we're approaching
     private int pathIndex = 0;
     private int fightCd = 0;              // attack cooldown ticks
+    private BlockPos oreGoal = null;      // an ore we're detouring to dig out
+    private int oreScanTick = 0;
     private double blocksTraveled = 0;    // session stats
     private long sessionStart = 0;
     private double lastX = Double.NaN;
@@ -309,29 +311,55 @@ public final class Autopilot {
             stop(mc, "reached spawn area");
             return;
         }
-        // choose which axis to advance so we staircase diagonally toward the target,
-        // switching axes in ~6-block segments instead of committing to one direction.
-        double totDx = targetX - startX;
-        double totDz = targetZ - startZ;
-        double adX = Math.abs(totDx);
-        double adZ = Math.abs(totDz);
-        double progX = (player.getX() - startX) * Math.signum(totDx);
-        double progZ = (player.getZ() - startZ) * Math.signum(totDz);
-        if (adX < 1) {
-            axisX = false;
-        } else if (adZ < 1) {
-            axisX = true;
-        } else if (axisX && progX > progZ * (adX / adZ) + 6) {
-            axisX = false;   // pulled ahead on X — switch to Z
-        } else if (!axisX && progZ > progX * (adZ / adX) + 6) {
-            axisX = true;    // pulled ahead on Z — switch to X
+        // ore-seek: detour to dig out a configured ore if one is nearby
+        if (oreGoal != null && !wantedOre(mc, oreGoal)) {
+            oreGoal = null;   // mined, or no longer wanted
         }
-        Direction primary = axisX
-            ? (totDx >= 0 ? Direction.EAST : Direction.WEST)
-            : (totDz >= 0 ? Direction.SOUTH : Direction.NORTH);
-        Direction secondary = axisX
-            ? (totDz >= 0 ? Direction.SOUTH : Direction.NORTH)
-            : (totDx >= 0 ? Direction.EAST : Direction.WEST);
+        if (oreGoal == null && CycleaConfig.get().oreSeekLevel > 0 && ++oreScanTick >= 8) {
+            oreScanTick = 0;
+            oreGoal = findWantedOre(mc, player.blockPosition(), 6);
+            if (oreGoal != null) {
+                say(mc, "§b⛏ ore spotted — detouring to grab it");
+            }
+        }
+
+        Direction primary;
+        Direction secondary;
+        if (oreGoal != null) {
+            // head straight for the ore
+            int odx = oreGoal.getX() - Mth.floor(player.getX());
+            int odz = oreGoal.getZ() - Mth.floor(player.getZ());
+            if (Math.abs(odx) >= Math.abs(odz)) {
+                primary = odx >= 0 ? Direction.EAST : Direction.WEST;
+                secondary = odz >= 0 ? Direction.SOUTH : Direction.NORTH;
+            } else {
+                primary = odz >= 0 ? Direction.SOUTH : Direction.NORTH;
+                secondary = odx >= 0 ? Direction.EAST : Direction.WEST;
+            }
+        } else {
+            // staircase diagonally toward the sweep target, alternating in ~6-block segments
+            double totDx = targetX - startX;
+            double totDz = targetZ - startZ;
+            double adX = Math.abs(totDx);
+            double adZ = Math.abs(totDz);
+            double progX = (player.getX() - startX) * Math.signum(totDx);
+            double progZ = (player.getZ() - startZ) * Math.signum(totDz);
+            if (adX < 1) {
+                axisX = false;
+            } else if (adZ < 1) {
+                axisX = true;
+            } else if (axisX && progX > progZ * (adX / adZ) + 6) {
+                axisX = false;
+            } else if (!axisX && progZ > progX * (adZ / adX) + 6) {
+                axisX = true;
+            }
+            primary = axisX
+                ? (totDx >= 0 ? Direction.EAST : Direction.WEST)
+                : (totDz >= 0 ? Direction.SOUTH : Direction.NORTH);
+            secondary = axisX
+                ? (totDz >= 0 ? Direction.SOUTH : Direction.NORTH)
+                : (totDx >= 0 ? Direction.EAST : Direction.WEST);
+        }
 
         BlockPos feet = player.blockPosition();
 
@@ -646,6 +674,35 @@ public final class Autopilot {
     private static boolean isOre(BlockState st) {
         String path = BuiltInRegistries.BLOCK.getKey(st.getBlock()).getPath();
         return path.endsWith("_ore") || path.equals("ancient_debris");
+    }
+
+    private static boolean wantedOre(Minecraft mc, BlockPos p) {
+        String path = BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(p).getBlock()).getPath();
+        return CycleaConfig.get().wantsOre(path);
+    }
+
+    /** Nearest configured ore within radius r that's safe to dig, else null. */
+    private static BlockPos findWantedOre(Minecraft mc, BlockPos c, int r) {
+        BlockPos best = null;
+        double bestD = Double.MAX_VALUE;
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dy = -r; dy <= r; dy++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    m.set(c.getX() + dx, c.getY() + dy, c.getZ() + dz);
+                    String path = BuiltInRegistries.BLOCK.getKey(
+                        mc.level.getBlockState(m).getBlock()).getPath();
+                    if (CycleaConfig.get().wantsOre(path) && !hasHazardNeighbor(mc, m)) {
+                        double d = dx * dx + dy * dy + dz * dz;
+                        if (d < bestD) {
+                            bestD = d;
+                            best = m.immutable();
+                        }
+                    }
+                }
+            }
+        }
+        return best;
     }
 
     private static boolean isShovelBlock(BlockState st) {
