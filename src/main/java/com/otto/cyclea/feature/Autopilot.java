@@ -40,8 +40,13 @@ public final class Autopilot {
     private int targetY = -59;    // depth to hold / return to
     private boolean approaching = false;   // true while navigating to a found base
     private boolean eating = false;
+    private int eatingTicks = 0;
     private int prevSlot = -1;
     private int scanTick = 0;
+    private BlockPos mining = null;   // the block we're committed to breaking (held for a steady camera)
+    private double driftYaw = 0;      // gentle random-walk so the camera looks alive, not locked
+    private double driftPitch = 0;
+    private final java.util.Random rng = new java.util.Random();
 
     private Autopilot() {
     }
@@ -96,6 +101,10 @@ public final class Autopilot {
 
     private void step(Minecraft mc) {
         var player = mc.player;
+
+        // gentle random-walk drift so the aim looks human, not machine-locked
+        driftYaw = Mth.clamp(driftYaw + (rng.nextDouble() - 0.5) * 0.35, -1.5, 1.5);
+        driftPitch = Mth.clamp(driftPitch + (rng.nextDouble() - 0.5) * 0.25, -1.0, 1.0);
 
         // 1) survival guard
         if (player.getHealth() <= 6.0f) {
@@ -163,7 +172,17 @@ public final class Autopilot {
             return;
         }
 
-        // 7) pick the block to clear: head, then feet, then (if too shallow) descend
+        // 7) if we're already committed to a block, keep on it until it's gone
+        //    (holding one target is what keeps the camera steady instead of jerking).
+        if (mining != null && (!passable(mc, mining) && !hazard(mc, mining))) {
+            key(mc, mc.options.keyUp, false);
+            aimAt(player, center(mining));
+            key(mc, mc.options.keyAttack, lookingAt(mc, mining));
+            return;
+        }
+        mining = null;
+
+        // pick the next block to clear: head, then feet, then (if too shallow) descend
         BlockPos target = null;
         if (!passable(mc, aheadHead)) {
             target = aheadHead;
@@ -175,40 +194,49 @@ public final class Autopilot {
         }
 
         if (target != null) {
-            // smoothly look AT the block, then let vanilla break what we're aiming at
-            aimAt(player, center(target));
+            mining = target;
             key(mc, mc.options.keyUp, false);
-            if (lookingAt(mc, target)) {
-                key(mc, mc.options.keyAttack, true);   // real, server-valid break
-            } else {
-                key(mc, mc.options.keyAttack, false);  // still turning — don't fake-break
-            }
+            aimAt(player, center(target));
+            key(mc, mc.options.keyAttack, lookingAt(mc, target));
         } else {
-            // path clear: face travel direction, then walk
+            // path clear: look at a steady point far along the travel line (level), then walk
             key(mc, mc.options.keyAttack, false);
             mc.gameMode.stopDestroyBlock();
-            aim(player, travelYaw, 0f);
+            Vec3 eye = player.getEyePosition();
+            aimAt(player, new Vec3(eye.x + Math.sin(-Math.toRadians(travelYaw)) * 8.0,
+                eye.y, eye.z + Math.cos(Math.toRadians(travelYaw)) * 8.0));
             if (passable(mc, aheadFeet.below()) && passable(mc, aheadFeet.below().below())) {
                 stop(mc, "§edrop ahead (avoiding a fall)");
                 return;
             }
-            boolean facing = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 25f;
+            boolean facing = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 20f;
             key(mc, mc.options.keyUp, facing);
         }
     }
 
-    private static final float TURN_SPEED = 16f;   // degrees per tick — human-ish, not a snap
+    private static final float TURN_EASE = 0.28f;   // fraction of the remaining angle per tick
+    private static final float TURN_MAX = 11f;      // hard cap on degrees/tick (fast pans stay smooth)
+    private static final float TURN_DEAD = 0.4f;    // snap the last fraction of a degree — kills micro-jitter
 
-    /** Turn smoothly toward a yaw/pitch, capped per tick so the camera glides. */
-    private static void aim(net.minecraft.client.player.LocalPlayer p, float yaw, float pitch) {
-        float dyaw = Mth.clamp(Mth.wrapDegrees(yaw - p.getYRot()), -TURN_SPEED, TURN_SPEED);
-        float dpitch = Mth.clamp(pitch - p.getXRot(), -TURN_SPEED, TURN_SPEED);
-        p.setYRot(p.getYRot() + dyaw);
-        p.setXRot(Mth.clamp(p.getXRot() + dpitch, -90f, 90f));
+    /**
+     * Ease smoothly toward a yaw/pitch: cover a fraction of the remaining angle
+     * each tick (so the camera decelerates and settles like a hand on a mouse),
+     * capped per tick, with a deadzone so it stops dead instead of shimmering.
+     */
+    private void aim(net.minecraft.client.player.LocalPlayer p, float yaw, float pitch) {
+        // fold the human drift into the goal so we ease toward a subtly-moving point
+        float goalYaw = yaw + (float) driftYaw;
+        float goalPitch = pitch + (float) driftPitch;
+        float dyaw = Mth.wrapDegrees(goalYaw - p.getYRot());
+        float dpitch = goalPitch - p.getXRot();
+        float sy = Math.abs(dyaw) < TURN_DEAD ? dyaw : Mth.clamp(dyaw * TURN_EASE, -TURN_MAX, TURN_MAX);
+        float sp = Math.abs(dpitch) < TURN_DEAD ? dpitch : Mth.clamp(dpitch * TURN_EASE, -TURN_MAX, TURN_MAX);
+        p.setYRot(p.getYRot() + sy);
+        p.setXRot(Mth.clamp(p.getXRot() + sp, -90f, 90f));
     }
 
     /** Aim smoothly at a world point (block center). */
-    private static void aimAt(net.minecraft.client.player.LocalPlayer p, Vec3 t) {
+    private void aimAt(net.minecraft.client.player.LocalPlayer p, Vec3 t) {
         Vec3 eye = p.getEyePosition();
         double d0 = t.x - eye.x;
         double d1 = t.y - eye.y;
@@ -234,15 +262,19 @@ public final class Autopilot {
         Inventory inv = player.getInventory();
 
         if (eating) {
-            if (player.isUsingItem()) {
-                key(mc, mc.options.keyUse, true);
+            eatingTicks++;
+            boolean full = food >= 18;
+            // give it a few ticks to actually start using before checking for completion
+            boolean done = (eatingTicks > 6 && !player.isUsingItem()) || full || eatingTicks > 45;
+            if (done) {
+                key(mc, mc.options.keyUse, false);
+                eating = false;
+                if (prevSlot >= 0) {
+                    inv.setSelectedSlot(prevSlot);
+                }
                 return true;
             }
-            key(mc, mc.options.keyUse, false);
-            eating = false;
-            if (prevSlot >= 0) {
-                inv.setSelectedSlot(prevSlot);
-            }
+            key(mc, mc.options.keyUse, true);
             return true;
         }
 
@@ -259,6 +291,7 @@ public final class Autopilot {
         mc.gameMode.stopDestroyBlock();
         key(mc, mc.options.keyUse, true);
         eating = true;
+        eatingTicks = 0;
         return true;
     }
 
