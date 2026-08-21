@@ -189,26 +189,28 @@ public final class Autopilot {
         } else if (!axisX && progZ > progX * (adZ / adX) + 6) {
             axisX = true;    // pulled ahead on Z — switch to X
         }
-        Direction dir = axisX
+        Direction primary = axisX
             ? (totDx >= 0 ? Direction.EAST : Direction.WEST)
             : (totDz >= 0 ? Direction.SOUTH : Direction.NORTH);
-        float travelYaw = dir.toYRot();
+        Direction secondary = axisX
+            ? (totDz >= 0 ? Direction.SOUTH : Direction.NORTH)
+            : (totDx >= 0 ? Direction.EAST : Direction.WEST);
 
         BlockPos feet = player.blockPosition();
+
+        // 6) route AROUND lava/water instead of just stopping: try the preferred
+        //    direction, then the other axis, then sidesteps. Only halt if boxed in.
+        Direction dir = chooseSafeDir(mc, feet, primary, secondary);
+        if (dir == null) {
+            stop(mc, "§cboxed in by lava/water — need you");
+            return;
+        }
+        if (dir != primary) {
+            mining = null;   // rerouting — drop the old dig target
+        }
+        float travelYaw = dir.toYRot();
         BlockPos aheadFeet = feet.relative(dir);
         BlockPos aheadHead = aheadFeet.above();
-
-        // 6) hazard guard — immediate water, and a WIDE lava sweep so we never
-        //    break into a lava pocket. Check a box around where we're about to dig.
-        if (lavaNear(mc, aheadFeet, 2) || lavaNear(mc, aheadHead, 2)) {
-            stop(mc, "§clava nearby — not risking it");
-            return;
-        }
-        if (hazard(mc, aheadFeet) || hazard(mc, aheadHead)
-            || hazard(mc, aheadFeet.below()) || hazard(mc, feet.below())) {
-            stop(mc, "§bwater ahead");
-            return;
-        }
 
         // 7) if we're already committed to a block, keep on it until it's gone
         //    (holding one target is what keeps the camera steady instead of jerking).
@@ -241,11 +243,15 @@ public final class Autopilot {
             key(mc, mc.options.keyAttack, false);
             mc.gameMode.stopDestroyBlock();
             if (--glanceTimer <= 0) {
-                glanceYaw = (rng.nextFloat() - 0.5f) * 34f;    // ±17° look around
-                glancePitch = (rng.nextFloat() - 0.5f) * 22f;  // ±11° up/down
-                glanceTimer = 18 + rng.nextInt(46);
+                // occasional big flick, otherwise a normal look-around
+                boolean flick = rng.nextFloat() < 0.35f;
+                float amp = flick ? 60f : 34f;
+                glanceYaw = (rng.nextFloat() - 0.5f) * amp;          // ±17° normal, ±30° flick
+                glancePitch = (rng.nextFloat() - 0.5f) * (flick ? 34f : 22f);
+                glanceTimer = flick ? 6 + rng.nextInt(10) : 12 + rng.nextInt(30);
             }
-            aim(player, travelYaw + glanceYaw, glancePitch);
+            float flickSpeed = Math.abs(glanceYaw) > 22f ? 16f : TURN_MAX;   // snap faster on big flicks
+            aim(player, travelYaw + glanceYaw, glancePitch, flickSpeed);
             if (passable(mc, aheadFeet.below()) && passable(mc, aheadFeet.below().below())) {
                 stop(mc, "§edrop ahead (avoiding a fall)");
                 return;
@@ -254,6 +260,28 @@ public final class Autopilot {
             boolean facing = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 42f;
             key(mc, mc.options.keyUp, facing);
         }
+    }
+
+    /**
+     * Pick the first direction that's safe to head into — preferring progress
+     * toward the target, then sidestepping to route around lava/water. Null if
+     * every option is blocked by a hazard.
+     */
+    private static Direction chooseSafeDir(Minecraft mc, BlockPos feet,
+                                           Direction primary, Direction secondary) {
+        Direction[] candidates = {primary, secondary, secondary.getOpposite(), primary.getOpposite()};
+        for (Direction d : candidates) {
+            BlockPos af = feet.relative(d);
+            BlockPos ah = af.above();
+            if (lavaNear(mc, af, 2) || lavaNear(mc, ah, 2)) {
+                continue;   // lava pocket — avoid
+            }
+            if (hazard(mc, af) || hazard(mc, ah) || hazard(mc, af.below())) {
+                continue;   // water/lava right there
+            }
+            return d;
+        }
+        return null;
     }
 
     /** Scan a box of half-size r around a position for lava — catches pockets before we dig in. */
@@ -282,13 +310,17 @@ public final class Autopilot {
      * capped per tick, with a deadzone so it stops dead instead of shimmering.
      */
     private void aim(net.minecraft.client.player.LocalPlayer p, float yaw, float pitch) {
+        aim(p, yaw, pitch, TURN_MAX);
+    }
+
+    private void aim(net.minecraft.client.player.LocalPlayer p, float yaw, float pitch, float maxSpeed) {
         // fold the human drift into the goal so we ease toward a subtly-moving point
         float goalYaw = yaw + (float) driftYaw;
         float goalPitch = pitch + (float) driftPitch;
         float dyaw = Mth.wrapDegrees(goalYaw - p.getYRot());
         float dpitch = goalPitch - p.getXRot();
-        float sy = Math.abs(dyaw) < TURN_DEAD ? dyaw : Mth.clamp(dyaw * TURN_EASE, -TURN_MAX, TURN_MAX);
-        float sp = Math.abs(dpitch) < TURN_DEAD ? dpitch : Mth.clamp(dpitch * TURN_EASE, -TURN_MAX, TURN_MAX);
+        float sy = Math.abs(dyaw) < TURN_DEAD ? dyaw : Mth.clamp(dyaw * TURN_EASE, -maxSpeed, maxSpeed);
+        float sp = Math.abs(dpitch) < TURN_DEAD ? dpitch : Mth.clamp(dpitch * TURN_EASE, -maxSpeed, maxSpeed);
         p.setYRot(p.getYRot() + sy);
         p.setXRot(Mth.clamp(p.getXRot() + sp, -90f, 90f));
     }
