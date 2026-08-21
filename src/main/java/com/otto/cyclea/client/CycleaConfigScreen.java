@@ -47,6 +47,12 @@ public class CycleaConfigScreen extends Screen {
             c.cycleOreSeek();
             b.setMessage(oreMsg());
         }).bounds(x, y, w, h).build());
+        y += 26;
+
+        addRenderableWidget(Button.builder(oneByOneMsg(), b -> {
+            c.cycleOneByOne();
+            b.setMessage(oneByOneMsg());
+        }).bounds(x, y, w, h).build());
         y += 40;
 
         addRenderableWidget(Button.builder(Component.literal("Done"), b -> this.onClose())
@@ -67,6 +73,10 @@ public class CycleaConfigScreen extends Screen {
 
     private Component oreMsg() {
         return Component.literal("Detour for ores: " + CycleaConfig.get().oreSeekLabel());
+    }
+
+    private Component oneByOneMsg() {
+        return Component.literal("1×1 trapdoor lane: " + CycleaConfig.get().oneByOneLabel());
     }
 
     @Override

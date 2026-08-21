@@ -13,6 +13,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
@@ -479,8 +480,18 @@ public final class Autopilot {
                 aim(player, travelYaw + glanceYaw, glancePitch);
             }
             if (passable(mc, aheadFeet.below()) && passable(mc, aheadFeet.below().below())) {
-                stop(mc, "§edrop ahead (avoiding a fall)");
+                // gap ahead — bridge it with a block if we have one, else stop
+                key(mc, mc.options.keyUp, false);
+                key(mc, mc.options.keySprint, false);
+                if (place(mc, aheadFeet.below(), "")) {
+                    return;   // placed a bridge block
+                }
+                stop(mc, "§edrop ahead, no blocks to bridge — need you");
                 return;
+            }
+            // 1×1 trapdoor mode: cap the tunnel with a trapdoor above head for a sprint-lane
+            if (CycleaConfig.get().oneByOne && mc.level.getBlockState(feet.above(2)).isAir()) {
+                place(mc, feet.above(2), "trapdoor");
             }
             // walk (and sprint) while pointed down the tunnel — tighter tolerance = straighter
             boolean facing = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 30f;
@@ -624,8 +635,12 @@ public final class Autopilot {
         double dxz = Math.sqrt(d0 * d0 + d2 * d2);
         float yaw = (float) (Math.toDegrees(Math.atan2(d2, d0)) - 90.0);
         float pitch = (float) (-Math.toDegrees(Math.atan2(d1, dxz)));
-        float dyaw = Mth.clamp(Mth.wrapDegrees(yaw - p.getYRot()), -40f, 40f);
-        float dpitch = Mth.clamp(pitch - p.getXRot(), -40f, 40f);
+        // ease-out but fast: cover ~55% of the remaining angle/tick (capped 26°),
+        // so it locks on in ~3 ticks and decelerates onto the block — smooth, not a snap.
+        float dyawFull = Mth.wrapDegrees(yaw - p.getYRot());
+        float dpitchFull = pitch - p.getXRot();
+        float dyaw = Math.abs(dyawFull) < 0.5f ? dyawFull : Mth.clamp(dyawFull * 0.55f, -26f, 26f);
+        float dpitch = Math.abs(dpitchFull) < 0.5f ? dpitchFull : Mth.clamp(dpitchFull * 0.55f, -26f, 26f);
         p.setYRot(p.getYRot() + dyaw);
         p.setXRot(Mth.clamp(p.getXRot() + dpitch, -90f, 90f));
     }
@@ -639,6 +654,40 @@ public final class Autopilot {
         float yaw = (float) (Math.toDegrees(Math.atan2(d2, d0)) - 90.0);
         float pitch = (float) (-Math.toDegrees(Math.atan2(d1, dxz)));
         aim(p, yaw, pitch, speed);
+    }
+
+    /**
+     * Place a held item at {@code target} by clicking a solid neighbour's face.
+     * {@code suffix} filters the hotbar item (e.g. "trapdoor"); empty = any
+     * placeable block. Knows the player position via the aim. @return true if placed.
+     */
+    private boolean place(Minecraft mc, BlockPos target, String suffix) {
+        if (!mc.level.getBlockState(target).isAir()) {
+            return false;   // something's already there
+        }
+        Inventory inv = mc.player.getInventory();
+        int slot = findHotbar(inv, s -> suffix.isEmpty()
+            ? s.getItem() instanceof BlockItem
+            : BuiltInRegistries.ITEM.getKey(s.getItem()).getPath().endsWith(suffix));
+        if (slot < 0) {
+            return false;   // no matching block/trapdoor in hotbar
+        }
+        for (Direction d : Direction.values()) {
+            BlockPos n = target.relative(d);
+            BlockState st = mc.level.getBlockState(n);
+            if (st.isAir() || st.is(Blocks.LAVA) || st.is(Blocks.WATER)) {
+                continue;   // need a solid face to click against
+            }
+            Direction face = d.getOpposite();
+            Vec3 hit = Vec3.atCenterOf(n).add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
+            inv.setSelectedSlot(slot);
+            aimAtFast(mc.player, hit);
+            BlockHitResult bhr = new BlockHitResult(hit, face, n, false);
+            mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, bhr);
+            mc.player.swing(InteractionHand.MAIN_HAND);
+            return true;
+        }
+        return false;
     }
 
     /** If a mineable solid block occupies {@code pos}, dig it out now. @return true if mining. */

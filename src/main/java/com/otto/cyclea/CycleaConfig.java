@@ -31,6 +31,17 @@ public final class CycleaConfig {
     public int chestMaxY = 20;
     // 0 = off, 1 = diamonds+debris, 2 = + emerald/gold, 3 = all ores
     public int oreSeekLevel = 1;
+    // place a trapdoor ceiling in the tunnel (1×1 sprint-lane trick); needs trapdoors in the hotbar
+    public boolean oneByOne = false;
+
+    public void cycleOneByOne() {
+        oneByOne = !oneByOne;
+        save();
+    }
+
+    public String oneByOneLabel() {
+        return oneByOne ? "On (needs trapdoors)" : "Off";
+    }
 
     /** Should the autopilot detour to dig this ore (by block path)? */
     public boolean wantsOre(String path) {
@@ -153,6 +164,7 @@ public final class CycleaConfig {
                 sweepStep = Integer.parseInt(p.getProperty("sweepStep", "48"));
                 chestMaxY = Integer.parseInt(p.getProperty("chestMaxY", "20"));
                 oreSeekLevel = Integer.parseInt(p.getProperty("oreSeekLevel", "1"));
+                oneByOne = Boolean.parseBoolean(p.getProperty("oneByOne", "false"));
             }
         } catch (Exception ignored) {
             // defaults are fine
@@ -166,6 +178,7 @@ public final class CycleaConfig {
         p.setProperty("sweepStep", Integer.toString(sweepStep));
         p.setProperty("chestMaxY", Integer.toString(chestMaxY));
         p.setProperty("oreSeekLevel", Integer.toString(oreSeekLevel));
+        p.setProperty("oneByOne", Boolean.toString(oneByOne));
         try (OutputStream out = Files.newOutputStream(file())) {
             p.store(out, "Cyclea config");
         } catch (IOException ignored) {
