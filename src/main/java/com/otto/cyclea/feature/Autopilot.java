@@ -419,6 +419,26 @@ public final class Autopilot {
         BlockPos aheadFeet = feet.relative(dir);
         BlockPos aheadHead = aheadFeet.above();
 
+        // 1×1 trapdoor lane (runs every tick, not just when walking): place a
+        // trapdoor at head-level behind, and mine back the older one to reuse it.
+        if (CycleaConfig.get().oneByOne) {
+            BlockPos old = placedTrapdoors.peekFirst();
+            if (old != null && !isTrapdoor(mc.level.getBlockState(old))) {
+                placedTrapdoors.pollFirst();   // already recovered
+            } else if (old != null && old.distManhattan(feet) > 3) {
+                key(mc, mc.options.keyUp, false);
+                key(mc, mc.options.keySprint, false);
+                aimAtFast(player, center(old));
+                key(mc, mc.options.keyAttack, lookingAt(mc, old));
+                return;   // break it to pick the trapdoor back up
+            }
+            BlockPos spot = feet.above().relative(dir.getOpposite());   // head-level, behind (air)
+            if (placedTrapdoors.size() < 2 && mc.level.getBlockState(spot).isAir()
+                && place(mc, spot, "trapdoor")) {
+                placedTrapdoors.addLast(spot.immutable());
+            }
+        }
+
         // 7) if we're already committed to a block, keep on it until it's gone
         //    (holding one target is what keeps the camera steady instead of jerking).
         // TOP PRIORITY: clear anything that fell/exists in our own head or feet
@@ -489,25 +509,6 @@ public final class Autopilot {
                 }
                 stop(mc, "§edrop ahead, no blocks to bridge — need you");
                 return;
-            }
-            // 1×1 trapdoor lane: place a trapdoor at head level just behind (an open
-            // spot in the dug tunnel), and MINE BACK the older one so a couple of
-            // trapdoors leapfrog along the tunnel and are never consumed.
-            if (CycleaConfig.get().oneByOne) {
-                BlockPos old = placedTrapdoors.peekFirst();
-                if (old != null && !isTrapdoor(mc.level.getBlockState(old))) {
-                    placedTrapdoors.pollFirst();   // already broken/recovered
-                } else if (old != null && old.distManhattan(feet) > 3) {
-                    key(mc, mc.options.keyUp, false);
-                    key(mc, mc.options.keySprint, false);
-                    aimAtFast(player, center(old));
-                    key(mc, mc.options.keyAttack, lookingAt(mc, old));
-                    return;   // breaking it to pick the trapdoor back up
-                }
-                BlockPos spot = feet.above().relative(dir.getOpposite());   // head-level, behind (air)
-                if (mc.level.getBlockState(spot).isAir() && place(mc, spot, "trapdoor")) {
-                    placedTrapdoors.addLast(spot.immutable());
-                }
             }
             // walk (and sprint) while pointed down the tunnel — tighter tolerance = straighter
             boolean facing = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 30f;

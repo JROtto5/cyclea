@@ -57,17 +57,20 @@ public final class CycleaConfig {
         }
         boolean diamond = path.contains("diamond") || path.equals("ancient_debris");
         if (oreSeekLevel == 1) {
-            return diamond;
+            // default: diamond + redstone — both drop XP (keeps tools mended)
+            return diamond || path.contains("redstone");
         }
-        return diamond || path.contains("emerald") || path.contains("gold");
+        // rare tier: also emerald/gold/lapis/quartz
+        return diamond || path.contains("redstone") || path.contains("emerald")
+            || path.contains("gold") || path.contains("lapis") || path.contains("quartz");
     }
 
     public String oreSeekLabel() {
         return switch (oreSeekLevel) {
             case 0 -> "Off";
-            case 2 -> "Rare (diamond/emerald/gold)";
+            case 2 -> "Rare + XP ores";
             case 3 -> "All ores";
-            default -> "Diamonds + debris";
+            default -> "Diamond + Redstone (XP)";
         };
     }
 
