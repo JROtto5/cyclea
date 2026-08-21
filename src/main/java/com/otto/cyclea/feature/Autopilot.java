@@ -80,7 +80,7 @@ public final class Autopilot {
 
     // search strategy
     public enum SearchMode { SWEEP, SPAWN }
-    private SearchMode searchMode = SearchMode.SWEEP;   // sweep an expanding area (finds far more)
+    private SearchMode searchMode = SearchMode.SPAWN;   // default: head toward spawn (press K for area-sweep)
     private static final int[][] DIRS = {{1, 0}, {0, -1}, {-1, 0}, {0, 1}};   // E, N, W, S
     private static final int SWEEP_STEP = 48;           // blocks per spiral leg unit
     private int spiralCornerX = 0;
