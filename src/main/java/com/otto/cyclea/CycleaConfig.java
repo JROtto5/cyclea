@@ -103,17 +103,17 @@ public final class CycleaConfig {
 
     public float turnEase() {
         return switch (turnLevel) {
-            case 0 -> 0.12f;
-            case 2 -> 0.28f;
-            default -> 0.18f;
+            case 0 -> 0.22f;
+            case 2 -> 0.6f;
+            default -> 0.4f;    // medium: quick but still eased (human, faster)
         };
     }
 
     public float turnMax() {
         return switch (turnLevel) {
-            case 0 -> 5f;
-            case 2 -> 12f;
-            default -> 7.5f;
+            case 0 -> 10f;
+            case 2 -> 34f;
+            default -> 22f;     // medium: ~440°/s cap — snappy yet smooth
         };
     }
 
