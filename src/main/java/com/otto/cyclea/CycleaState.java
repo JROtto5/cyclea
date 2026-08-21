@@ -75,6 +75,10 @@ public final class CycleaState {
         return active;
     }
 
+    public void setActive(boolean value) {
+        active = value;
+    }
+
     public boolean isCompact() {
         return compactHud;
     }

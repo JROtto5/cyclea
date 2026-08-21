@@ -1,6 +1,7 @@
 package com.otto.cyclea.client;
 
 import com.otto.cyclea.CycleaState;
+import com.otto.cyclea.feature.Autopilot;
 import com.otto.cyclea.feature.MinimapBridge;
 import com.otto.cyclea.feature.TargetScanner;
 import net.fabricmc.api.ClientModInitializer;
@@ -36,6 +37,7 @@ public class CycleaClient implements ClientModInitializer {
     private KeyMapping cycleKey;
     private KeyMapping compactKey;
     private KeyMapping pinKey;
+    private KeyMapping autopilotKey;
     private int tickCounter = 0;
     private List<TargetScanner.Base> lastBases = List.of();
 
@@ -45,6 +47,7 @@ public class CycleaClient implements ClientModInitializer {
         cycleKey = reg("key.cyclea.cycle", GLFW.GLFW_KEY_RIGHT_BRACKET);
         compactKey = reg("key.cyclea.compact", GLFW.GLFW_KEY_BACKSLASH);
         pinKey = reg("key.cyclea.pin", GLFW.GLFW_KEY_P);
+        autopilotKey = reg("key.cyclea.autopilot", GLFW.GLFW_KEY_O);
 
         HudElementRegistry.addLast(
             Identifier.fromNamespaceAndPath("cyclea", "radar"), new CycleaHud());
@@ -82,6 +85,20 @@ public class CycleaClient implements ClientModInitializer {
                 say(mc, "§7Cyclea: no new bases to pin");
             }
         }
+        while (autopilotKey.consumeClick()) {
+            boolean on = Autopilot.get().toggle(mc);
+            if (on) {
+                st.setActive(true);   // finder must run so the autopilot can halt on bases
+                say(mc, "§6[Autopilot] §aENGAGED §7— heading toward "
+                    + Autopilot.get().getTargetX() + "," + Autopilot.get().getTargetZ()
+                    + " (spawn), mining/eating/dodging lava until a base pings");
+            } else {
+                say(mc, "§6[Autopilot] §7disengaged");
+            }
+        }
+
+        // drive the bot every tick (it self-guards and no-ops when off)
+        Autopilot.get().tick(mc);
 
         if (!st.isActive() || mc.level == null) {
             return;

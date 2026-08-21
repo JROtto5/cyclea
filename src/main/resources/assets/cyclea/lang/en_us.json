@@ -3,5 +3,6 @@
   "key.cyclea.toggle": "Toggle Base Finder",
   "key.cyclea.cycle": "Cycle Target",
   "key.cyclea.compact": "Compact HUD",
-  "key.cyclea.pin": "Pin Bases to Minimap"
+  "key.cyclea.pin": "Pin Bases to Minimap",
+  "key.cyclea.autopilot": "Autopilot (toward spawn)"
 }
