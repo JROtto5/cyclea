@@ -47,6 +47,20 @@ public final class Autopilot {
     private double driftYaw = 0;      // gentle random-walk so the camera looks alive, not locked
     private double driftPitch = 0;
     private final java.util.Random rng = new java.util.Random();
+    private double startX = 0;        // where this leg began — for diagonal staircasing to the target
+    private double startZ = 0;
+    private boolean axisX = false;    // which axis we're currently advancing (alternates in ~6-block segments)
+    private int glanceTimer = 0;      // countdown to the next "look around" while walking
+    private float glanceYaw = 0;      // current look-around offset (degrees) added while walking
+    private float glancePitch = 0;
+
+    private void newLeg(Minecraft mc) {
+        if (mc.player != null) {
+            startX = mc.player.getX();
+            startZ = mc.player.getZ();
+        }
+        mining = null;
+    }
 
     private Autopilot() {
     }
@@ -74,6 +88,7 @@ public final class Autopilot {
             approaching = false;
             if (mc.player != null) {
                 targetY = mc.player.blockPosition().getY();   // hold the depth you start at
+                newLeg(mc);
             }
         } else {
             releaseAll(mc);
@@ -123,6 +138,7 @@ public final class Autopilot {
                 targetX = best.center().getX();
                 targetZ = best.center().getZ();
                 approaching = true;
+                newLeg(mc);
                 mc.player.playSound(net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 1.4f);
                 say(mc, "§a★ BASE FOUND §f" + best.chests() + " chests, " + best.shulkers()
                     + " shulkers §7at §f" + best.center().getX() + "," + best.center().getY()
@@ -156,19 +172,41 @@ public final class Autopilot {
             }
             return;
         }
-        float travelYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
-        Direction dir = Direction.fromYRot(travelYaw);
+        // choose which axis to advance so we staircase diagonally toward the target,
+        // switching axes in ~6-block segments instead of committing to one direction.
+        double totDx = targetX - startX;
+        double totDz = targetZ - startZ;
+        double adX = Math.abs(totDx);
+        double adZ = Math.abs(totDz);
+        double progX = (player.getX() - startX) * Math.signum(totDx);
+        double progZ = (player.getZ() - startZ) * Math.signum(totDz);
+        if (adX < 1) {
+            axisX = false;
+        } else if (adZ < 1) {
+            axisX = true;
+        } else if (axisX && progX > progZ * (adX / adZ) + 6) {
+            axisX = false;   // pulled ahead on X — switch to Z
+        } else if (!axisX && progZ > progX * (adZ / adX) + 6) {
+            axisX = true;    // pulled ahead on Z — switch to X
+        }
+        Direction dir = axisX
+            ? (totDx >= 0 ? Direction.EAST : Direction.WEST)
+            : (totDz >= 0 ? Direction.SOUTH : Direction.NORTH);
+        float travelYaw = dir.toYRot();
 
         BlockPos feet = player.blockPosition();
         BlockPos aheadFeet = feet.relative(dir);
         BlockPos aheadHead = aheadFeet.above();
 
-        // 6) hazard guard — lava AND water
+        // 6) hazard guard — immediate water, and a WIDE lava sweep so we never
+        //    break into a lava pocket. Check a box around where we're about to dig.
+        if (lavaNear(mc, aheadFeet, 2) || lavaNear(mc, aheadHead, 2)) {
+            stop(mc, "§clava nearby — not risking it");
+            return;
+        }
         if (hazard(mc, aheadFeet) || hazard(mc, aheadHead)
             || hazard(mc, aheadFeet.below()) || hazard(mc, feet.below())) {
-            stop(mc, isLava(mc, aheadFeet) || isLava(mc, aheadHead)
-                || isLava(mc, aheadFeet.below()) || isLava(mc, feet.below())
-                ? "§clava ahead" : "§bwater ahead");
+            stop(mc, "§bwater ahead");
             return;
         }
 
@@ -199,24 +237,44 @@ public final class Autopilot {
             aimAt(player, center(target));
             key(mc, mc.options.keyAttack, lookingAt(mc, target));
         } else {
-            // path clear: look at a steady point far along the travel line (level), then walk
+            // path clear: walk, glancing around like a person scanning the tunnel
             key(mc, mc.options.keyAttack, false);
             mc.gameMode.stopDestroyBlock();
-            Vec3 eye = player.getEyePosition();
-            aimAt(player, new Vec3(eye.x + Math.sin(-Math.toRadians(travelYaw)) * 8.0,
-                eye.y, eye.z + Math.cos(Math.toRadians(travelYaw)) * 8.0));
+            if (--glanceTimer <= 0) {
+                glanceYaw = (rng.nextFloat() - 0.5f) * 34f;    // ±17° look around
+                glancePitch = (rng.nextFloat() - 0.5f) * 22f;  // ±11° up/down
+                glanceTimer = 18 + rng.nextInt(46);
+            }
+            aim(player, travelYaw + glanceYaw, glancePitch);
             if (passable(mc, aheadFeet.below()) && passable(mc, aheadFeet.below().below())) {
                 stop(mc, "§edrop ahead (avoiding a fall)");
                 return;
             }
-            boolean facing = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 20f;
+            // keep walking as long as we're roughly pointed down the tunnel
+            boolean facing = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 42f;
             key(mc, mc.options.keyUp, facing);
         }
     }
 
-    private static final float TURN_EASE = 0.28f;   // fraction of the remaining angle per tick
-    private static final float TURN_MAX = 11f;      // hard cap on degrees/tick (fast pans stay smooth)
-    private static final float TURN_DEAD = 0.4f;    // snap the last fraction of a degree — kills micro-jitter
+    /** Scan a box of half-size r around a position for lava — catches pockets before we dig in. */
+    private static boolean lavaNear(Minecraft mc, BlockPos c, int r) {
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dy = -r; dy <= r; dy++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    m.set(c.getX() + dx, c.getY() + dy, c.getZ() + dz);
+                    if (mc.level.getBlockState(m).is(Blocks.LAVA)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static final float TURN_EASE = 0.18f;   // fraction of the remaining angle per tick (gentle)
+    private static final float TURN_MAX = 7.5f;     // hard cap on degrees/tick (fast pans stay smooth)
+    private static final float TURN_DEAD = 0.35f;   // snap the last fraction of a degree — kills micro-jitter
 
     /**
      * Ease smoothly toward a yaw/pitch: cover a fraction of the remaining angle
