@@ -413,6 +413,15 @@ public final class Autopilot {
 
         // 7) if we're already committed to a block, keep on it until it's gone
         //    (holding one target is what keeps the camera steady instead of jerking).
+        // TOP PRIORITY: clear anything that fell/exists in our own head or feet
+        // (gravel & sand avalanche as we dig) so we never suffocate or jam.
+        if (mineHere(mc, feet.above())) {
+            return;   // head first
+        }
+        if (mineHere(mc, feet)) {
+            return;   // then feet
+        }
+
         if (mining != null && !passable(mc, mining) && !hazard(mc, mining)
             && !hasHazardNeighbor(mc, mining) && !isUnbreakable(mc.level.getBlockState(mining))) {
             selectToolFor(mc, mc.level.getBlockState(mining));
@@ -604,6 +613,21 @@ public final class Autopilot {
         float yaw = (float) (Math.toDegrees(Math.atan2(d2, d0)) - 90.0);
         float pitch = (float) (-Math.toDegrees(Math.atan2(d1, dxz)));
         aim(p, yaw, pitch);
+    }
+
+    /** If a mineable solid block occupies {@code pos}, dig it out now. @return true if mining. */
+    private boolean mineHere(Minecraft mc, BlockPos pos) {
+        if (passable(mc, pos) || hazard(mc, pos) || hasHazardNeighbor(mc, pos)
+            || isUnbreakable(mc.level.getBlockState(pos))) {
+            return false;
+        }
+        mining = pos;
+        selectToolFor(mc, mc.level.getBlockState(pos));
+        key(mc, mc.options.keyUp, false);
+        key(mc, mc.options.keySprint, false);
+        aimAt(mc.player, center(pos));
+        key(mc, mc.options.keyAttack, lookingAt(mc, pos));
+        return true;
     }
 
     private static boolean lookingAt(Minecraft mc, BlockPos pos) {
