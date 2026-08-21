@@ -8,6 +8,9 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
@@ -59,6 +62,19 @@ public final class Autopilot {
     private int detourTicks = 0;
     private List<BlockPos> path = null;   // A* route to the base we're approaching
     private int pathIndex = 0;
+    private int fightCd = 0;              // attack cooldown ticks
+    private double blocksTraveled = 0;    // session stats
+    private long sessionStart = 0;
+    private double lastX = Double.NaN;
+    private double lastZ = Double.NaN;
+
+    public int getBlocksTraveled() {
+        return (int) blocksTraveled;
+    }
+
+    public long getSessionSeconds() {
+        return sessionStart == 0 ? 0 : (System.currentTimeMillis() - sessionStart) / 1000;
+    }
 
     // search strategy
     public enum SearchMode { SWEEP, SPAWN }
@@ -191,10 +207,30 @@ public final class Autopilot {
         driftYaw = Mth.clamp(driftYaw + (rng.nextDouble() - 0.5) * 0.35, -1.5, 1.5);
         driftPitch = Mth.clamp(driftPitch + (rng.nextDouble() - 0.5) * 0.25, -1.0, 1.0);
 
+        // session stats: accumulate horizontal distance travelled
+        if (sessionStart == 0) {
+            sessionStart = System.currentTimeMillis();
+        }
+        if (!Double.isNaN(lastX)) {
+            double dxT = player.getX() - lastX;
+            double dzT = player.getZ() - lastZ;
+            blocksTraveled += Math.sqrt(dxT * dxT + dzT * dzT);
+        }
+        lastX = player.getX();
+        lastZ = player.getZ();
+
         // 1) survival guard (heal attempts happen in step 3; only bail if truly critical)
         if (player.getHealth() <= 4.0f) {
             stop(mc, "§ccritical health");
             return;
+        }
+
+        // 1b) self-defense: fight off a hostile that's on us
+        if (fightCd > 0) {
+            fightCd--;
+        }
+        if (fightNearbyHostile(mc)) {
+            return;   // fighting takes priority this tick
         }
 
         // 2) base found? (throttled — scanning every tick would lag)
@@ -488,6 +524,38 @@ public final class Autopilot {
 
     private static Vec3 center(BlockPos p) {
         return new Vec3(p.getX() + 0.5, p.getY() + 0.5, p.getZ() + 0.5);
+    }
+
+    /** Face and hit the nearest hostile within reach; @return true if fighting. */
+    private boolean fightNearbyHostile(Minecraft mc) {
+        Entity target = null;
+        double bestD = 4.5;
+        for (Entity e : mc.level.entitiesForRendering()) {
+            if (e instanceof Monster && e.isAlive()) {
+                double d = mc.player.distanceTo(e);
+                if (d < bestD) {
+                    bestD = d;
+                    target = e;
+                }
+            }
+        }
+        if (target == null) {
+            return false;
+        }
+        // grab a sword if we have one
+        Inventory inv = mc.player.getInventory();
+        int sword = findHotbar(inv, s -> BuiltInRegistries.ITEM.getKey(s.getItem()).getPath().endsWith("sword"));
+        if (sword >= 0) {
+            inv.setSelectedSlot(sword);
+        }
+        key(mc, mc.options.keyUp, false);
+        aimAt(mc.player, target.getEyePosition());
+        if (fightCd == 0) {
+            mc.gameMode.attack(mc.player, target);
+            mc.player.swing(InteractionHand.MAIN_HAND);
+            fightCd = 11;   // vanilla attack cooldown-ish
+        }
+        return true;
     }
 
     /** @return true while eating (caller should pause). */

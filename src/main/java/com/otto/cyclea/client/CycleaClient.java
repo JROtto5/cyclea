@@ -42,6 +42,7 @@ public class CycleaClient implements ClientModInitializer {
     private KeyMapping searchModeKey;
     private KeyMapping configKey;
     private int tickCounter = 0;
+    private boolean wasAlive = true;
     private List<TargetScanner.Base> lastBases = List.of();
 
     @Override
@@ -95,6 +96,15 @@ public class CycleaClient implements ClientModInitializer {
             return;
         }
         CycleaState st = CycleaState.get();
+
+        // death → drop a death waypoint on the map
+        boolean alive = mc.player.isAlive() && mc.player.getHealth() > 0f;
+        if (wasAlive && !alive) {
+            if (MinimapBridge.pushDeath(mc.player.blockPosition())) {
+                say(mc, "§7☠ death point pinned to your map");
+            }
+        }
+        wasAlive = alive;
 
         while (toggleKey.consumeClick()) {
             boolean on = st.toggle();

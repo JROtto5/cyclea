@@ -70,6 +70,21 @@ public final class MinimapBridge {
         return b.chests() >= 4 ? WaypointColor.GOLD : WaypointColor.GRAY;
     }
 
+    /** Drop a death-point waypoint where the player died. Returns true if placed. */
+    public static boolean pushDeath(BlockPos p) {
+        try {
+            WaypointSet set = currentSet();
+            if (set == null) {
+                return false;
+            }
+            set.add(new Waypoint(p.getX(), p.getY(), p.getZ(),
+                "Death " + p.getX() + "," + p.getZ(), "☠", WaypointColor.WHITE));
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     private static WaypointSet currentSet() {
         XaeroMinimapSession session = XaeroMinimapSession.getCurrentSession();
         if (session == null) {

@@ -1,6 +1,7 @@
 package com.otto.cyclea.client;
 
 import com.otto.cyclea.CycleaState;
+import com.otto.cyclea.feature.Autopilot;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
@@ -54,7 +55,13 @@ public class CycleaHud implements HudElement {
         if (!s.getNearestLine().isEmpty()) {
             g.text(font, s.getBearing() + "   " + s.getVertical(), x, y + 60, 0xFFC0C0C0, true);
         }
-        g.text(font, "[ on   ] cycle   \\ compact   P pin", x, y + 72, 0xFF808080, true);
+        if (Autopilot.get().isActive()) {
+            long sec = Autopilot.get().getSessionSeconds();
+            g.text(font, "§6AUTO ▶ " + Autopilot.get().getBlocksTraveled() + "m  "
+                + (sec / 60) + "m" + (sec % 60) + "s", x, y + 72, 0xFFFFC060, true);
+        } else {
+            g.text(font, "[ on  ] cycle  \\ compact  O auto  J config", x, y + 72, 0xFF808080, true);
+        }
 
         drawRadar(g, s, x + 168, y + 44, 28);
     }

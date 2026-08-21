@@ -17,6 +17,9 @@
   "entrypoints": {
     "client": [
       "com.otto.cyclea.client.CycleaClient"
+    ],
+    "modmenu": [
+      "com.otto.cyclea.client.CycleaModMenu"
     ]
   },
   "depends": {
