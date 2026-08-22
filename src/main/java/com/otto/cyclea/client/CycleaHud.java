@@ -30,6 +30,7 @@ public class CycleaHud implements HudElement {
             if (CycleaConfig.get().oreEsp || CycleaConfig.get().tracers) {
                 renderWorldOverlay(g, mc, s);
             }
+            renderBaseLog(g, mc, s);
             renderBigAlert(g, mc, s);
         }
         if (!s.isActive() || mc.player == null) {
@@ -276,6 +277,31 @@ public class CycleaHud implements HudElement {
             int px = x1 + (x2 - x1) * i / steps;
             int py = y1 + (y2 - y1) * i / steps;
             g.fill(px, py, px + 1, py + 1, color);
+        }
+    }
+
+    /** Top-right base log: recent finds with coords, colored by quality (red = worth
+     *  going back to). Drawn over the world and over open menus. */
+    static void renderBaseLog(GuiGraphicsExtractor g, Minecraft mc, CycleaState s) {
+        List<CycleaState.Found> founds = s.getFounds();
+        if (founds.isEmpty()) {
+            return;
+        }
+        Font f = mc.font;
+        int right = g.guiWidth() - 5;
+        int y = 5;
+        String title = "BASES ↩ go back to";
+        g.fill(right - f.width(title) - 10, 2, right + 2, 4 + 12 + founds.size() * 11, 0x88000000);
+        g.text(f, title, right - f.width(title), y, 0xFFFFD24A, true);
+        y += 13;
+        for (CycleaState.Found fo : founds) {
+            String line = fo.x() + ", " + fo.y() + ", " + fo.z()
+                + "  " + fo.chests() + "c " + fo.shulkers() + "s";
+            int tw = f.width(line);
+            int col = 0xFF000000 | fo.color();
+            g.fill(right - tw - 8, y + 1, right - tw - 4, y + 6, col);   // quality dot
+            g.text(f, line, right - tw, y, col, true);
+            y += 11;
         }
     }
 

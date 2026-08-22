@@ -205,6 +205,28 @@ public final class CycleaState {
         this.oreBlips = b;
     }
 
+    // base log (top-right): recent finds with coords, colored by quality
+    public record Found(int x, int y, int z, int color, int chests, int shulkers) {}
+
+    private final java.util.ArrayDeque<Found> founds = new java.util.ArrayDeque<>();
+    private final Set<Long> foundKeys = new java.util.HashSet<>();
+
+    public synchronized void addFound(int x, int y, int z, int chests, int shulkers, int color) {
+        long k = (((long) (x >> 3)) & 0x1FFFFF) << 42 | (((long) (y >> 3)) & 0xFFFFF) << 22
+            | ((z >> 3) & 0x3FFFFF);
+        if (!foundKeys.add(k)) {
+            return;   // already logged this spot
+        }
+        founds.addFirst(new Found(x, y, z, color, chests, shulkers));
+        while (founds.size() > 12) {
+            founds.removeLast();
+        }
+    }
+
+    public synchronized List<Found> getFounds() {
+        return new ArrayList<>(founds);
+    }
+
     // big on-screen alert banner
     private volatile String alertText = "";
     private volatile int alertColor = 0xFFFFFFFF;

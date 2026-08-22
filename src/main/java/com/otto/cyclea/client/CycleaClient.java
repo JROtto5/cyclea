@@ -82,6 +82,7 @@ public class CycleaClient implements ClientModInitializer {
                 if (CycleaConfig.get().oreEsp || CycleaConfig.get().tracers) {
                     CycleaHud.renderWorldOverlay(gx, m, st);
                 }
+                CycleaHud.renderBaseLog(gx, m, st);
                 CycleaHud.renderBigAlert(gx, m, st);
             }));
 
@@ -277,6 +278,13 @@ public class CycleaClient implements ClientModInitializer {
         for (TargetScanner.Base b : scan.bases()) {
             baseCenters.add(b.center());
             richest = Math.max(richest, b.total());
+            int col = switch (b.status()) {
+                case "LOADED" -> 0xFF5050;
+                case "partial" -> 0xFFC020;
+                default -> 0x9AA0AB;
+            };
+            st.addFound(b.center().getX(), b.center().getY(), b.center().getZ(),
+                b.chests(), b.shulkers(), col);
         }
 
         int fresh = st.recordBases(baseCenters);

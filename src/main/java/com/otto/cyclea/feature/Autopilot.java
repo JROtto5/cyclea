@@ -748,6 +748,11 @@ public final class Autopilot {
             TargetScanner.Scan scan = TargetScanner.scan(mc);
             // always pin every base to the map so you can find them yourself
             int pinned = MinimapBridge.pushBases(scan.bases());
+            // log each to the top-right "go back to" panel, colored by quality
+            for (TargetScanner.Base b : scan.bases()) {
+                CycleaState.get().addFound(b.center().getX(), b.center().getY(), b.center().getZ(),
+                    b.chests(), b.shulkers(), baseColor(b.status()));
+            }
             // worthwhile = passes the "only looted-worthy" filter
             java.util.List<TargetScanner.Base> worth = new java.util.ArrayList<>();
             for (TargetScanner.Base b : scan.bases()) {
@@ -2270,6 +2275,15 @@ public final class Autopilot {
     private static boolean hazard(Minecraft mc, BlockPos pos) {
         BlockState st = mc.level.getBlockState(pos);
         return st.is(Blocks.LAVA) || st.is(Blocks.WATER);
+    }
+
+    /** Base-log dot colour by status: red = loaded (go back!), gold = partial, gray = raided. */
+    private static int baseColor(String status) {
+        return switch (status) {
+            case "LOADED" -> 0xFF5050;
+            case "partial" -> 0xFFC020;
+            default -> 0x9AA0AB;
+        };
     }
 
     private static TargetScanner.Base richest(List<TargetScanner.Base> bases) {
