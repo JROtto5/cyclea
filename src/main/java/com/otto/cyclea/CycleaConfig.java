@@ -124,6 +124,18 @@ public final class CycleaConfig {
         return stashPause ? "On (stop at stash)" : "Off (keep scouting)";
     }
 
+    // Watchman: warn when another player comes within range while you're underground
+    public boolean watchman = true;
+
+    public void cycleWatchman() {
+        watchman = !watchman;
+        save();
+    }
+
+    public String watchmanLabel() {
+        return watchman ? "On (warn if a player nears)" : "Off";
+    }
+
     // draw see-through ore outlines projected onto the screen (ESP overlay)
     public boolean oreEsp = true;
 
@@ -324,6 +336,7 @@ public final class CycleaConfig {
                 oreSeekLevel = Integer.parseInt(p.getProperty("oreSeekLevel", "1"));
                 oneByOne = Boolean.parseBoolean(p.getProperty("oneByOne", "false"));
                 paceLevel = Integer.parseInt(p.getProperty("paceLevel", "1"));
+                watchman = Boolean.parseBoolean(p.getProperty("watchman", "true"));
                 oreEsp = Boolean.parseBoolean(p.getProperty("oreEsp", "true"));
                 autoSell = Boolean.parseBoolean(p.getProperty("autoSell", "true"));
                 sellCommand = p.getProperty("sellCommand", "sell");
@@ -350,6 +363,7 @@ public final class CycleaConfig {
         p.setProperty("oreSeekLevel", Integer.toString(oreSeekLevel));
         p.setProperty("oneByOne", Boolean.toString(oneByOne));
         p.setProperty("paceLevel", Integer.toString(paceLevel));
+        p.setProperty("watchman", Boolean.toString(watchman));
         p.setProperty("oreEsp", Boolean.toString(oreEsp));
         p.setProperty("autoSell", Boolean.toString(autoSell));
         p.setProperty("sellCommand", sellCommand);

@@ -41,7 +41,10 @@ public class CycleaClient implements ClientModInitializer {
     private KeyMapping autopilotKey;
     private KeyMapping searchModeKey;
     private KeyMapping modeKey;
+    private KeyMapping panicKey;
     private KeyMapping configKey;
+    private int watchCounter = 0;
+    private int watchAlertCd = 0;
     private int tickCounter = 0;
     private int oreScanCounter = 0;
     private boolean wasAlive = true;
@@ -56,6 +59,7 @@ public class CycleaClient implements ClientModInitializer {
         autopilotKey = reg("key.cyclea.autopilot", GLFW.GLFW_KEY_O);
         searchModeKey = reg("key.cyclea.searchmode", GLFW.GLFW_KEY_K);
         modeKey = reg("key.cyclea.mode", GLFW.GLFW_KEY_M);
+        panicKey = reg("key.cyclea.panic", GLFW.GLFW_KEY_G);
         configKey = reg("key.cyclea.config", GLFW.GLFW_KEY_J);
 
         CycleaConfig.get().load();
@@ -88,6 +92,49 @@ public class CycleaClient implements ClientModInitializer {
         } catch (Exception ignored) {
             // non-fatal
         }
+    }
+
+    /** Warn (chat + sound) when another player is within range — underground early warning. */
+    private void watchman(Minecraft mc) {
+        if (watchAlertCd > 0) {
+            watchAlertCd--;
+        }
+        if (!CycleaConfig.get().watchman || mc.level == null || mc.player == null) {
+            return;
+        }
+        if (++watchCounter < 20) {
+            return;
+        }
+        watchCounter = 0;
+        final double range = 96.0;
+        net.minecraft.world.entity.player.Player nearest = null;
+        double best = range;
+        for (net.minecraft.world.entity.player.Player pl : mc.level.players()) {
+            if (pl == mc.player || !pl.isAlive()) {
+                continue;
+            }
+            double d = pl.distanceTo(mc.player);
+            if (d < best) {
+                best = d;
+                nearest = pl;
+            }
+        }
+        if (nearest != null && watchAlertCd == 0) {
+            BlockPos me = mc.player.blockPosition();
+            BlockPos them = nearest.blockPosition();
+            String dir = compass(them.getX() - me.getX(), them.getZ() - me.getZ());
+            mc.player.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 0.5f);
+            say(mc, "§c⚠ PLAYER NEARBY: §f" + nearest.getName().getString()
+                + " §7" + (int) best + "m " + dir + " §8(y" + them.getY() + ") — press §fG§8 to seal in");
+            watchAlertCd = 100;   // ~5s between warnings
+        }
+    }
+
+    private static String compass(int dx, int dz) {
+        String v = dz < -4 ? "N" : dz > 4 ? "S" : "";
+        String h = dx > 4 ? "E" : dx < -4 ? "W" : "";
+        String s = v + h;
+        return s.isEmpty() ? "here" : s;
     }
 
     private static KeyMapping reg(String id, int key) {
@@ -163,6 +210,12 @@ public class CycleaClient implements ClientModInitializer {
         while (modeKey.consumeClick()) {
             Autopilot.get().toggleMode(mc);   // Miner ⇄ Surface scout
         }
+        while (panicKey.consumeClick()) {
+            Autopilot.get().panicSeal(mc);    // wall into a 1×1 safe-hole
+        }
+
+        // Watchman: warn if another player comes near while you're down here
+        watchman(mc);
 
         // drive the bot every tick (it self-guards and no-ops when off)
         Autopilot.get().tick(mc);

@@ -54,6 +54,7 @@ public class CycleaConfigScreen extends Screen {
         addRow(modeMsg(), b -> { c.cycleMode(); b.setMessage(modeMsg()); });
         addRow(stashMsg(), b -> { c.cycleStashLevel(); b.setMessage(stashMsg()); });
         addRow(oreEspMsg(), b -> { c.cycleOreEsp(); b.setMessage(oreEspMsg()); });
+        addRow(watchmanMsg(), b -> { c.cycleWatchman(); b.setMessage(watchmanMsg()); });
         addRow(stashPauseMsg(), b -> { c.cycleStashPause(); b.setMessage(stashPauseMsg()); });
         addRow(turnMsg(), b -> { c.cycleTurn(); b.setMessage(turnMsg()); });
         addRow(glanceMsg(), b -> { c.cycleGlance(); b.setMessage(glanceMsg()); });
@@ -120,6 +121,10 @@ public class CycleaConfigScreen extends Screen {
 
     private Component oreEspMsg() {
         return Component.literal("Ore X-ray overlay: " + CycleaConfig.get().oreEspLabel());
+    }
+
+    private Component watchmanMsg() {
+        return Component.literal("Watchman [G=seal]: " + CycleaConfig.get().watchmanLabel());
     }
 
     private Component stashPauseMsg() {

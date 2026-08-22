@@ -245,6 +245,25 @@ public final class Autopilot {
         return -59;
     }
 
+    /** Panic Seal: wall yourself into a 1×1 pocket from mined blocks (the "doog" safe-hole).
+     *  Stops the bot and boxes in all four sides at foot + head level, plus the ceiling. */
+    public void panicSeal(Minecraft mc) {
+        if (mc.player == null) {
+            return;
+        }
+        active = false;                    // hold still while we wall up
+        releaseAll(mc);
+        BlockPos feet = mc.player.blockPosition();
+        boolean any = false;
+        for (Direction d : Direction.Plane.HORIZONTAL) {
+            any |= place(mc, feet.relative(d), "");
+            any |= place(mc, feet.above().relative(d), "");
+        }
+        any |= place(mc, feet.above(2), "");   // ceiling
+        say(mc, any ? "§c⛒ PANIC SEAL §7— walled in. Mine out when it's clear."
+            : "§cPanic Seal: no blocks in the hotbar to wall up with!");
+    }
+
     private Autopilot() {
     }
 
