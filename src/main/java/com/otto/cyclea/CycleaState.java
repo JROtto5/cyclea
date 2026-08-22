@@ -205,6 +205,17 @@ public final class CycleaState {
         this.oreBlips = b;
     }
 
+    // container tracer targets: {x, y, z, rgb}
+    private volatile List<int[]> containerBlips = List.of();
+
+    public List<int[]> getContainerBlips() {
+        return containerBlips;
+    }
+
+    public void setContainerBlips(List<int[]> b) {
+        this.containerBlips = b;
+    }
+
     public void setSnapshot(int chests, int shulkers, int bases, int beacons,
                             int players, int hostiles, int richest, int nearestLoot,
                             int nearestDistance, String nearest, String vert,

@@ -123,6 +123,34 @@ public final class TargetScanner {
         return out;
     }
 
+    /** Nearby containers (chests/barrels/shulkers) within {@code radius} as {x,y,z,rgb}
+     *  for the on-screen tracers. Shulkers purple, chests/barrels orange. */
+    public static List<int[]> scanContainers(Minecraft mc, int radius) {
+        List<int[]> out = new ArrayList<>();
+        ClientLevel level = mc.level;
+        if (level == null || mc.player == null) {
+            return out;
+        }
+        BlockPos me = mc.player.blockPosition();
+        long r2 = (long) radius * radius;
+        for (BlockEntity be : loadedBlockEntities(mc, level)) {
+            boolean shulker = be instanceof ShulkerBoxBlockEntity;
+            boolean chest = be instanceof ChestBlockEntity || be instanceof BarrelBlockEntity;
+            if (!shulker && !chest) {
+                continue;
+            }
+            BlockPos p = be.getBlockPos();
+            if (me.distSqr(p) > r2) {
+                continue;
+            }
+            out.add(new int[]{p.getX(), p.getY(), p.getZ(), shulker ? 0xC060FF : 0xFF9020});
+            if (out.size() >= 80) {
+                break;
+            }
+        }
+        return out;
+    }
+
     private static int oreColor(String path) {
         if (path.contains("diamond")) {
             return 0x33E5FF;

@@ -114,72 +114,159 @@ public class CycleaHud implements HudElement {
         g.fill(cx - 1, cy - 1, cx + 2, cy + 2, 0xFFFFFFFF); // player
     }
 
+    /** Camera→screen projector in GUI space (no world-render hook needed). */
+    private static final class Proj {
+        final double cx;
+        final double cy;
+        final double cz;
+        final double fX;
+        final double fY;
+        final double fZ;
+        final double rX;
+        final double rZ;
+        final double uX;
+        final double uY;
+        final double uZ;
+        final double f;
+        final int gw;
+        final int gh;
+        boolean ok = true;
+
+        Proj(Camera cam, int gw, int gh) {
+            Vec3 cp = cam.position();
+            cx = cp.x;
+            cy = cp.y;
+            cz = cp.z;
+            double yaw = Math.toRadians(cam.yRot());
+            double pitch = Math.toRadians(cam.xRot());
+            fX = -Math.sin(yaw) * Math.cos(pitch);
+            fY = -Math.sin(pitch);
+            fZ = Math.cos(yaw) * Math.cos(pitch);
+            double rl = Math.sqrt(fZ * fZ + fX * fX);
+            ok = rl > 1e-4;
+            rX = ok ? -fZ / rl : 0;
+            rZ = ok ? fX / rl : 0;
+            uX = -rZ * fY;
+            uY = rZ * fX - rX * fZ;
+            uZ = rX * fY;
+            this.gw = gw;
+            this.gh = gh;
+            this.f = (gh / 2.0) / Math.tan(Math.toRadians(Math.max(30, cam.getFov())) / 2.0);
+        }
+
+        /** {sx, sy} in GUI space, or null if behind the camera. */
+        int[] to(double x, double y, double z) {
+            double dx = x - cx;
+            double dy = y - cy;
+            double dz = z - cz;
+            double fwd = dx * fX + dy * fY + dz * fZ;
+            if (fwd < 0.4) {
+                return null;
+            }
+            double right = dx * rX + dz * rZ;
+            double up = dx * uX + dy * uY + dz * uZ;
+            return new int[]{
+                (int) Math.round(gw / 2.0 + (right / fwd) * f),
+                (int) Math.round(gh / 2.0 - (up / fwd) * f),
+                (int) fwd};
+        }
+    }
+
     /**
-     * See-through ore overlay: project each nearby selected ore's world position onto the
-     * screen (manual camera projection in GUI space) and draw a colored box outline there —
-     * an ESP that shows ores through walls, without needing a world-render hook.
+     * See-through overlay: ore boxes, tracer lines to ores/chests, and the travel route —
+     * all projected onto the screen so they read like X-ray/ESP without a world-render hook.
      */
     private void drawOreEsp(GuiGraphicsExtractor g, Minecraft mc, CycleaState s) {
-        List<int[]> ores = s.getOreBlips();
-        if (ores.isEmpty()) {
-            return;
-        }
         Camera cam = mc.gameRenderer.mainCamera();
         if (cam == null || !cam.isInitialized()) {
             return;
         }
-        Vec3 cp = cam.position();
-        double yaw = Math.toRadians(cam.yRot());
-        double pitch = Math.toRadians(cam.xRot());
-        double cyaw = Math.cos(yaw);
-        double syaw = Math.sin(yaw);
-        double cpit = Math.cos(pitch);
-        double spit = Math.sin(pitch);
-        // forward, right, up basis (Minecraft convention)
-        double fX = -syaw * cpit;
-        double fY = -spit;
-        double fZ = cyaw * cpit;
-        double rLen = Math.sqrt(fZ * fZ + fX * fX);
-        if (rLen < 1e-4) {
+        Proj p = new Proj(cam, g.guiWidth(), g.guiHeight());
+        if (!p.ok) {
             return;
         }
-        double rX = -fZ / rLen;
-        double rZ = fX / rLen;
-        double uX = -rZ * fY;
-        double uY = rZ * fX - rX * fZ;
-        double uZ = rX * fY;
+        boolean tracers = CycleaConfig.get().tracers;
+        int ox = p.gw / 2;
+        int oy = p.gh - 2;   // tracers fan out from the bottom-center
 
-        int gw = g.guiWidth();
-        int gh = g.guiHeight();
-        double fov = Math.toRadians(Math.max(30, cam.getFov()));
-        double f = (gh / 2.0) / Math.tan(fov / 2.0);
-
+        // ore boxes (+ optional tracer to each)
         int drawn = 0;
-        for (int[] o : ores) {
-            double relX = o[0] + 0.5 - cp.x;
-            double relY = o[1] + 0.5 - cp.y;
-            double relZ = o[2] + 0.5 - cp.z;
-            double camFwd = relX * fX + relY * fY + relZ * fZ;
-            if (camFwd < 0.4) {
-                continue;   // behind us
-            }
-            double camRight = relX * rX + relZ * rZ;
-            double camUp = relX * uX + relY * uY + relZ * uZ;
-            int sx = (int) Math.round(gw / 2.0 + (camRight / camFwd) * f);
-            int sy = (int) Math.round(gh / 2.0 - (camUp / camFwd) * f);
-            if (sx < -20 || sx > gw + 20 || sy < -20 || sy > gh + 20) {
+        for (int[] o : s.getOreBlips()) {
+            int[] sp = p.to(o[0] + 0.5, o[1] + 0.5, o[2] + 0.5);
+            if (sp == null || sp[0] < -20 || sp[0] > p.gw + 20 || sp[1] < -20 || sp[1] > p.gh + 20) {
                 continue;
             }
-            int half = (int) Math.max(2, Math.min(26, (0.85 / camFwd) * f));
             int col = 0xFF000000 | o[3];
-            // box outline (4 thin edges)
-            g.fill(sx - half, sy - half, sx + half, sy - half + 1, col);   // top
-            g.fill(sx - half, sy + half - 1, sx + half, sy + half, col);   // bottom
-            g.fill(sx - half, sy - half, sx - half + 1, sy + half, col);   // left
-            g.fill(sx + half - 1, sy - half, sx + half, sy + half, col);   // right
+            int half = Math.max(2, Math.min(26, (int) (0.85 / Math.max(1, sp[2]) * p.f)));
+            g.fill(sp[0] - half, sp[1] - half, sp[0] + half, sp[1] - half + 1, col);
+            g.fill(sp[0] - half, sp[1] + half - 1, sp[0] + half, sp[1] + half, col);
+            g.fill(sp[0] - half, sp[1] - half, sp[0] - half + 1, sp[1] + half, col);
+            g.fill(sp[0] + half - 1, sp[1] - half, sp[0] + half, sp[1] + half, col);
+            if (tracers && drawn < 10) {
+                line(g, ox, oy, sp[0], sp[1], (col & 0x00FFFFFF) | 0x77000000);
+            }
             if (++drawn >= 120) {
                 break;
             }
+        }
+
+        // chest/shulker tracers + a small marker
+        if (tracers) {
+            int c = 0;
+            for (int[] b : s.getContainerBlips()) {
+                int[] sp = p.to(b[0] + 0.5, b[1] + 0.5, b[2] + 0.5);
+                if (sp == null) {
+                    continue;
+                }
+                int col = 0xFF000000 | b[3];
+                g.fill(sp[0] - 2, sp[1] - 2, sp[0] + 2, sp[1] + 2, col);
+                if (c < 8) {
+                    line(g, ox, oy, sp[0], sp[1], (col & 0x00FFFFFF) | 0x66000000);
+                }
+                if (++c >= 40) {
+                    break;
+                }
+            }
+        }
+
+        // travel route: a green polyline through the A* path (or a line to the target)
+        if (tracers && mc.player != null) {
+            List<net.minecraft.core.BlockPos> path = Autopilot.get().getPath();
+            int prevX = ox;
+            int prevY = oy;
+            boolean any = false;
+            for (net.minecraft.core.BlockPos n : path) {
+                int[] sp = p.to(n.getX() + 0.5, n.getY() + 0.5, n.getZ() + 0.5);
+                if (sp == null) {
+                    continue;
+                }
+                line(g, prevX, prevY, sp[0], sp[1], 0x9930FF60);
+                prevX = sp[0];
+                prevY = sp[1];
+                any = true;
+            }
+            if (!any && Autopilot.get().isActive()) {
+                int[] sp = p.to(Autopilot.get().getTargetX() + 0.5, mc.player.getY(),
+                    Autopilot.get().getTargetZ() + 0.5);
+                if (sp != null) {
+                    line(g, ox, oy, sp[0], sp[1], 0x9930FF60);
+                }
+            }
+        }
+    }
+
+    /** Cheap 2D line via stepped 1-px fills (clipped to the screen). */
+    private void line(GuiGraphicsExtractor g, int x1, int y1, int x2, int y2, int color) {
+        int dx = Math.abs(x2 - x1);
+        int dy = Math.abs(y2 - y1);
+        int steps = Math.max(dx, dy);
+        if (steps <= 0 || steps > 2000) {
+            return;
+        }
+        for (int i = 0; i <= steps; i += 2) {   // every 2px keeps it light
+            int px = x1 + (x2 - x1) * i / steps;
+            int py = y1 + (y2 - y1) * i / steps;
+            g.fill(px, py, px + 1, py + 1, color);
         }
     }
 

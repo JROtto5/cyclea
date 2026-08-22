@@ -280,6 +280,11 @@ public final class Autopilot {
         return targetZ;
     }
 
+    /** The A* route we're following (empty if we're just sweeping/mining). */
+    public java.util.List<BlockPos> getPath() {
+        return path == null ? java.util.List.of() : new java.util.ArrayList<>(path);
+    }
+
     public void setTarget(int x, int z) {
         targetX = x;
         targetZ = z;

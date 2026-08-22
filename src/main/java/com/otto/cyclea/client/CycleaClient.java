@@ -230,9 +230,11 @@ public class CycleaClient implements ClientModInitializer {
             if (++oreScanCounter >= 20) {
                 oreScanCounter = 0;
                 st.setOreBlips(TargetScanner.scanOres(mc, 20));
+                st.setContainerBlips(TargetScanner.scanContainers(mc, 48));
             }
         } else {
             st.setOreBlips(java.util.List.of());
+            st.setContainerBlips(java.util.List.of());
         }
 
         if (!st.isActive() || mc.level == null) {

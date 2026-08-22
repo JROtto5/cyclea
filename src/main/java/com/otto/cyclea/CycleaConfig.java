@@ -139,6 +139,18 @@ public final class CycleaConfig {
     // draw see-through ore outlines projected onto the screen (ESP overlay)
     public boolean oreEsp = true;
 
+    // draw tracer lines to ores/chests and the travel route
+    public boolean tracers = true;
+
+    public void cycleTracers() {
+        tracers = !tracers;
+        save();
+    }
+
+    public String tracersLabel() {
+        return tracers ? "On (lines to ores/chests/route)" : "Off";
+    }
+
     public void cycleOreEsp() {
         oreEsp = !oreEsp;
         save();
@@ -338,6 +350,7 @@ public final class CycleaConfig {
                 paceLevel = Integer.parseInt(p.getProperty("paceLevel", "1"));
                 watchman = Boolean.parseBoolean(p.getProperty("watchman", "true"));
                 oreEsp = Boolean.parseBoolean(p.getProperty("oreEsp", "true"));
+                tracers = Boolean.parseBoolean(p.getProperty("tracers", "true"));
                 autoSell = Boolean.parseBoolean(p.getProperty("autoSell", "true"));
                 sellCommand = p.getProperty("sellCommand", "sell");
                 if (sellCommand.equals("sell all")) {
@@ -365,6 +378,7 @@ public final class CycleaConfig {
         p.setProperty("paceLevel", Integer.toString(paceLevel));
         p.setProperty("watchman", Boolean.toString(watchman));
         p.setProperty("oreEsp", Boolean.toString(oreEsp));
+        p.setProperty("tracers", Boolean.toString(tracers));
         p.setProperty("autoSell", Boolean.toString(autoSell));
         p.setProperty("sellCommand", sellCommand);
         p.setProperty("mode", Integer.toString(mode));
