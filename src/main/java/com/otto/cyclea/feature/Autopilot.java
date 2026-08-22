@@ -80,6 +80,7 @@ public final class Autopilot {
     private int idleTicks = 0;
     private BlockPos pillarSpot = null;       // spot to fill mid-jump when climbing out of Y-60
     private int climbTicks = 0;               // how long we've been climbing out of a dip
+    private int pillarTicks = 0;              // how long the current pillar-up has been running
     private int jumpTicks = 0;
     private double blocksTraveled = 0;    // session stats
     private long sessionStart = 0;
@@ -339,6 +340,8 @@ public final class Autopilot {
         idleTicks = 0;
         pillarSpot = null;
         climbTicks = 0;
+        pillarTicks = 0;
+        vaultState = 0;
         deadTicks = 0;
         aliveX = Double.NaN;
         aliveInv = -1;
@@ -420,7 +423,19 @@ public final class Autopilot {
 
     /** Called every client tick. Fully guarded — any trouble halts safely. */
     public void tick(Minecraft mc) {
-        if (!active || mc.player == null || mc.level == null) {
+        if (mc.player == null || mc.level == null) {
+            return;
+        }
+        // BUILDING A VAULT: runs even when autopilot is OFF (it's a manual one-shot).
+        if (vaultState != 0) {
+            try {
+                handleVault(mc);
+            } catch (Throwable t) {
+                vaultState = 0;
+            }
+            return;
+        }
+        if (!active) {
             return;
         }
         // SELLING: if we're mid-way through operating the server's /sell GUI, do only
@@ -477,6 +492,12 @@ public final class Autopilot {
     private boolean frozenSoRestart(Minecraft mc) {
         var p = mc.player;
         if (manualPauseTicks > 0) {   // you're driving — don't count that as frozen
+            deadTicks = 0;
+            return false;
+        }
+        // don't restart while climbing out of a dip (it legitimately doesn't move
+        // horizontally) — a restart would wipe the pillar mid-attempt
+        if (pillarSpot != null || p.blockPosition().getY() < targetY) {
             deadTicks = 0;
             return false;
         }
@@ -579,50 +600,66 @@ public final class Autopilot {
             return;
         }
 
-        // 1b3) Y-60 CLIMB — TOP PRIORITY. If we've sunk below the target depth, getting
-        //      back up beats everything else. This runs BEFORE the anti-stuck jumping (which
-        //      was keeping us airborne so the old grounded check never fired — the bug that
-        //      made it "never figure out Y-60"). Works whether grounded OR airborne.
+        // 1b3) Y-60 CLIMB — TOP PRIORITY. Getting back to the target depth beats everything.
         BlockPos feetC = player.blockPosition();
+
+        // (0) MID-PILLAR LATCH — runs BEFORE the Y check. The jump momentarily lifts our
+        //     block-position to the target level, which used to skip the placement and drop
+        //     us back down (the 20-fails bug). Keyed on pillarSpot so it always completes.
+        if (pillarSpot != null) {
+            pillarTicks++;
+            if (!mc.level.getBlockState(pillarSpot).isAir() || pillarTicks > 30) {
+                pillarSpot = null;   // block placed (or gave up) — pillar resolved
+            } else {
+                place(mc, pillarSpot, "");   // fill the vacated cell while airborne
+                key(mc, mc.options.keyJump, true);
+                return;
+            }
+        }
+
         if (feetC.getY() < targetY) {
             climbTicks++;
             key(mc, mc.options.keyUp, false);
+            key(mc, mc.options.keySprint, false);
 
-            // (a) FIRST ~0.8s: try to walk-jump up onto adjacent higher ground (usually
-            //     the tunnel we came from). Sprint-jump so it actually mounts the block.
-            if (climbTicks < 16) {
-                Direction stepUp = findStepUp(mc, feetC);
-                if (stepUp != null) {
-                    aim(player, stepUp.toYRot(), -6f);   // face the step, look slightly up
+            // (a) FIND OPEN AIR: look for the nearest reachable standing spot at/above the
+            //     target level and dig/walk a staircase to it (your idea — line it up).
+            Direction esc = findEscapeDir(mc, feetC);
+            if (esc != null) {
+                BlockPos ah = feetC.relative(esc);
+                if (canMine(mc, ah.above())) {
+                    swingAt(mc, ah.above());
+                    return;
+                }
+                if (canMine(mc, ah)) {
+                    swingAt(mc, ah);
+                    return;
+                }
+                if (passable(mc, ah) && passable(mc, ah.above())) {
+                    aim(player, esc.toYRot(), -4f);
                     key(mc, mc.options.keyUp, true);
                     key(mc, mc.options.keySprint, true);
                     key(mc, mc.options.keyJump, true);
                     return;
                 }
+                // else blocked by bedrock/unbreakable — fall through to the pillar
             }
-            key(mc, mc.options.keySprint, false);
 
-            // (b) clear any ceiling that would block rising
+            // (b) clear any ceiling that blocks rising in place
             BlockPos head2 = feetC.above(2);
             if (canMine(mc, head2)) {
                 swingAt(mc, head2);
                 return;
             }
 
-            // (c) PILLAR up — reliable ANYWHERE as long as we have a block (we keep a
-            //     cobbled-deepslate building stock). Jump, then fill the vacated cell
-            //     mid-air so we land a level higher. This is the guaranteed escape.
-            if (player.onGround()) {
-                if (ensureHotbarBlock(mc)) {
-                    pillarSpot = feetC;
-                }
-                key(mc, mc.options.keyJump, true);
-            } else if (pillarSpot != null) {
-                place(mc, pillarSpot, "");
-                key(mc, mc.options.keyJump, true);
-            } else {
-                key(mc, mc.options.keyJump, true);
+            // (c) PILLAR — the guaranteed escape. Jump now; the (0) latch above fills the
+            //     cell mid-air next ticks and lands us a level higher. Needs one block
+            //     (we always keep a building stock).
+            if (player.onGround() && ensureHotbarBlock(mc)) {
+                pillarSpot = feetC;
+                pillarTicks = 0;
             }
+            key(mc, mc.options.keyJump, true);
             return;
         }
         climbTicks = 0;
@@ -1314,6 +1351,40 @@ public final class Autopilot {
         return null;
     }
 
+    /** Find the nearest reachable OPEN standing spot at/above the target depth and return
+     *  the horizontal direction toward it — so the climb can dig/walk a staircase up to
+     *  daylight instead of flailing. Scans a small volume; null if none in range. */
+    private Direction findEscapeDir(Minecraft mc, BlockPos feet) {
+        Direction best = null;
+        int bestD = Integer.MAX_VALUE;
+        for (int dx = -3; dx <= 3; dx++) {
+            for (int dz = -3; dz <= 3; dz++) {
+                if (dx == 0 && dz == 0) {
+                    continue;
+                }
+                for (int dy = 1; dy <= 2; dy++) {
+                    BlockPos c = feet.offset(dx, dy, dz);
+                    if (c.getY() < targetY) {
+                        continue;
+                    }
+                    boolean standable = passable(mc, c) && passable(mc, c.above())
+                        && !passable(mc, c.below()) && !hazard(mc, c.below()) && !hazard(mc, c);
+                    if (!standable) {
+                        continue;
+                    }
+                    int d = dx * dx + dz * dz + dy * dy;
+                    if (d < bestD) {
+                        bestD = d;
+                        best = Math.abs(dx) >= Math.abs(dz)
+                            ? (dx >= 0 ? Direction.EAST : Direction.WEST)
+                            : (dz >= 0 ? Direction.SOUTH : Direction.NORTH);
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
     /** True if {@code n} (at feet level) is a solid block we can jump up onto: solid,
      *  safe, with two air blocks above to stand in. */
     private boolean isStepUp(Minecraft mc, BlockPos n) {
@@ -1467,6 +1538,194 @@ public final class Autopilot {
             return true;
         }
         return false;
+    }
+
+    // ---------------- Stash vault builder ----------------
+
+    private int vaultState = 0;      // 0 idle, 1 hollow, 2 place shulkers, 3 fill
+    private BlockPos vaultOrigin = null;
+    private int vaultTimeout = 0;
+    private int vaultOpenWait = 0;
+    private int vaultFillIdx = 0;
+    private final java.util.List<BlockPos> vaultShulkers = new java.util.ArrayList<>();
+
+    private static final int VAULT_R = 2;   // 5×5 footprint
+    private static final int VAULT_H = 2;   // 3 tall (feet + 2)
+
+    /** Items to KEEP in the inventory (never deposit): gear, armor, food, torches,
+     *  buckets, shulkers, emerald-currency, and a building stock. */
+    private static final java.util.Set<String> KEEP_EXACT = java.util.Set.of(
+        "emerald", "ender_pearl", "ender_chest", "totem_of_undying", "water_bucket",
+        "lava_bucket", "bucket", "cooked_beef", "cooked_porkchop", "bread", "golden_carrot",
+        "golden_apple", "enchanted_golden_apple", "cooked_chicken", "cooked_mutton",
+        "baked_potato", "cooked_cod", "cooked_salmon", "elytra", "flint_and_steel");
+
+    private static boolean keepItem(ItemStack s) {
+        String p = itemPath(s);
+        if (p.endsWith("axe") || p.endsWith("shovel") || p.endsWith("sword") || p.endsWith("hoe")
+            || p.endsWith("shears") || p.endsWith("shulker_box") || p.endsWith("torch")
+            || p.endsWith("bucket") || p.endsWith("_helmet") || p.endsWith("_chestplate")
+            || p.endsWith("_leggings") || p.endsWith("_boots")) {
+            return true;
+        }
+        return BUILD.contains(p) || KEEP_EXACT.contains(p);
+    }
+
+    /** Trigger (or cancel) the stash-vault build at the player's feet. */
+    public void buildVault(Minecraft mc) {
+        if (mc.player == null) {
+            return;
+        }
+        if (vaultState != 0) {
+            vaultState = 0;
+            releaseAll(mc);
+            say(mc, "§7vault build cancelled");
+            return;
+        }
+        active = false;
+        releaseAll(mc);
+        vaultOrigin = mc.player.blockPosition();
+        vaultShulkers.clear();
+        vaultFillIdx = 0;
+        vaultOpenWait = 0;
+        vaultTimeout = 0;
+        vaultState = 1;
+        say(mc, "§b⛏ Building stash vault — hollowing a 5×3×5 room…");
+    }
+
+    public boolean vaultActive() {
+        return vaultState != 0;
+    }
+
+    private void handleVault(Minecraft mc) {
+        if (mc.player == null || vaultOrigin == null) {
+            vaultState = 0;
+            return;
+        }
+        if (++vaultTimeout > 6000) {   // 5-min safety valve
+            vaultState = 0;
+            say(mc, "§7vault: timed out");
+            return;
+        }
+        switch (vaultState) {
+            case 1 -> hollowStep(mc);
+            case 2 -> placeShulkersStep(mc);
+            case 3 -> fillStep(mc);
+            default -> vaultState = 0;
+        }
+    }
+
+    /** Mine out the room interior, nearest block first (all within reach of the centre). */
+    private void hollowStep(Minecraft mc) {
+        BlockPos best = null;
+        double bestD = Double.MAX_VALUE;
+        Vec3 eye = mc.player.getEyePosition();
+        for (int y = 0; y <= VAULT_H; y++) {
+            for (int x = -VAULT_R; x <= VAULT_R; x++) {
+                for (int z = -VAULT_R; z <= VAULT_R; z++) {
+                    BlockPos b = vaultOrigin.offset(x, y, z);
+                    if (!canMine(mc, b)) {
+                        continue;
+                    }
+                    double d = eye.distanceToSqr(Vec3.atCenterOf(b));
+                    if (d < bestD) {
+                        bestD = d;
+                        best = b;
+                    }
+                }
+            }
+        }
+        if (best == null) {
+            vaultState = 2;   // room is hollow → place shulkers
+            mining = null;
+            say(mc, "§broom hollow — placing shulkers…");
+            return;
+        }
+        mining = best;
+        swingAt(mc, best);
+    }
+
+    /** Place shulker boxes along the far wall floor (needs shulkers in the hotbar). */
+    private void placeShulkersStep(Minecraft mc) {
+        if (vaultShulkers.size() >= (VAULT_R * 2 + 1) || !hotbarHas(mc, "shulker_box")) {
+            if (vaultShulkers.isEmpty()) {
+                vaultState = 0;
+                say(mc, "§evault: put some shulker boxes in your hotbar, then press V again");
+                return;
+            }
+            vaultState = 3;
+            vaultFillIdx = 0;
+            say(mc, "§bfilling " + vaultShulkers.size() + " shulker(s) with loot…");
+            return;
+        }
+        int idx = vaultShulkers.size();
+        BlockPos pos = vaultOrigin.offset(-VAULT_R + idx, 0, VAULT_R);
+        if (!mc.level.getBlockState(pos).isAir()) {
+            vaultShulkers.add(pos);   // occupied — record and move on
+            return;
+        }
+        place(mc, pos, "shulker_box");
+        vaultShulkers.add(pos);   // record regardless; fill step verifies it's a shulker
+    }
+
+    /** Open each placed shulker, shift the depositable loot in, close, next. */
+    private void fillStep(Minecraft mc) {
+        var p = mc.player;
+        if (vaultFillIdx >= vaultShulkers.size()) {
+            finishVault(mc);
+            return;
+        }
+        // a container is open → it's the shulker; deposit and move on
+        if (p.containerMenu != null && p.containerMenu.containerId != 0) {
+            var menu = p.containerMenu;
+            for (int i = 0; i < menu.slots.size(); i++) {
+                var slot = menu.slots.get(i);
+                if (slot.container != p.getInventory() || !slot.hasItem() || keepItem(slot.getItem())) {
+                    continue;
+                }
+                mc.gameMode.handleContainerInput(menu.containerId, i, 0,
+                    net.minecraft.world.inventory.ContainerInput.QUICK_MOVE, p);
+            }
+            p.closeContainer();
+            vaultFillIdx++;
+            vaultOpenWait = 0;
+            return;
+        }
+        // open the current shulker
+        BlockPos s = vaultShulkers.get(vaultFillIdx);
+        if (!itemPathBlock(mc, s).endsWith("shulker_box")) {
+            vaultFillIdx++;   // place failed here — skip
+            return;
+        }
+        ensurePickaxe(mc);   // hold a non-placeable so right-click opens, not places
+        aimAtFast(p, center(s));
+        mc.gameMode.useItemOn(p, InteractionHand.MAIN_HAND,
+            new BlockHitResult(center(s), Direction.UP, s, false));
+        if (++vaultOpenWait > 40) {
+            vaultFillIdx++;   // couldn't open — skip
+            vaultOpenWait = 0;
+        }
+    }
+
+    private void finishVault(Minecraft mc) {
+        vaultState = 0;
+        int leftover = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = mc.player.getInventory().getItem(i);
+            if (!s.isEmpty() && !keepItem(s)) {
+                leftover++;
+            }
+        }
+        say(mc, "§a✔ Vault done — " + vaultShulkers.size() + " shulkers stocked"
+            + (leftover > 0 ? " §7(" + leftover + " stacks didn't fit)" : "") + ".");
+    }
+
+    private boolean hotbarHas(Minecraft mc, String suffix) {
+        return findHotbar(mc.player.getInventory(), s -> itemPath(s).endsWith(suffix)) >= 0;
+    }
+
+    private String itemPathBlock(Minecraft mc, BlockPos p) {
+        return BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(p).getBlock()).getPath();
     }
 
     // ---------------- Surface scout mode ----------------

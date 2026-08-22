@@ -42,6 +42,7 @@ public class CycleaClient implements ClientModInitializer {
     private KeyMapping searchModeKey;
     private KeyMapping modeKey;
     private KeyMapping panicKey;
+    private KeyMapping vaultKey;
     private KeyMapping configKey;
     private int watchCounter = 0;
     private int watchAlertCd = 0;
@@ -60,6 +61,7 @@ public class CycleaClient implements ClientModInitializer {
         searchModeKey = reg("key.cyclea.searchmode", GLFW.GLFW_KEY_K);
         modeKey = reg("key.cyclea.mode", GLFW.GLFW_KEY_M);
         panicKey = reg("key.cyclea.panic", GLFW.GLFW_KEY_G);
+        vaultKey = reg("key.cyclea.vault", GLFW.GLFW_KEY_V);
         configKey = reg("key.cyclea.config", GLFW.GLFW_KEY_J);
 
         CycleaConfig.get().load();
@@ -212,6 +214,9 @@ public class CycleaClient implements ClientModInitializer {
         }
         while (panicKey.consumeClick()) {
             Autopilot.get().panicSeal(mc);    // wall into a 1×1 safe-hole
+        }
+        while (vaultKey.consumeClick()) {
+            Autopilot.get().buildVault(mc);   // hollow a room + sort loot into shulkers
         }
 
         // Watchman: warn if another player comes near while you're down here
