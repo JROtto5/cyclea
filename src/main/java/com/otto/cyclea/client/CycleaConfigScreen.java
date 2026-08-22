@@ -5,13 +5,26 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.Mth;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Cyclea's settings screen. Button-only so it renders cleanly on 26.2's new GUI
- * pipeline — each button shows a setting and cycles it on click, saving to disk.
- * Open it with the config key (default J).
+ * pipeline. The settings list now scrolls with the mouse wheel between a fixed
+ * header and a fixed Done button, so it never runs off the screen. Open with J.
  */
 public class CycleaConfigScreen extends Screen {
+
+    private final List<Button> rows = new ArrayList<>();
+    private int scroll = 0;
+    private int viewTop;
+    private int viewBottom;
+    private int rowX;
+    private static final int ROW_W = 240;
+    private static final int ROW_H = 24;
+    private static final int BTN_H = 20;
 
     public CycleaConfigScreen() {
         super(Minecraft.getInstance(), Minecraft.getInstance().font, Component.literal("Cyclea Config"));
@@ -20,104 +33,77 @@ public class CycleaConfigScreen extends Screen {
     @Override
     protected void init() {
         CycleaConfig c = CycleaConfig.get();
-        int w = 240;
-        int h = 20;
-        int x = this.width / 2 - w / 2;
-        int y = this.height / 8;
+        rows.clear();
+        rowX = this.width / 2 - ROW_W / 2;
+        viewTop = 34;
+        int doneY = this.height - 28;
+        viewBottom = doneY - 8;
 
-        addRenderableWidget(Button.builder(presetMsg(), b -> {
+        // fixed header (non-interactive label)
+        Button header = Button.builder(Component.literal("Cyclea Config  —  scroll for more"), b -> { })
+            .bounds(rowX, 8, ROW_W, BTN_H).build();
+        header.active = false;
+        addRenderableWidget(header);
+
+        // scrolling settings rows
+        addRow(presetMsg(), b -> {
             c.presetIdx = (c.presetIdx + 1) % CycleaConfig.PRESETS.length;
             c.applyPreset(c.presetIdx);
-            this.rebuildWidgets();   // refresh every button to the new values
-        }).bounds(x, y, w, h).build());
-        y += 26;
-
-        addRenderableWidget(Button.builder(modeMsg(), b -> {
-            c.cycleMode();
-            b.setMessage(modeMsg());
-        }).bounds(x, y, w, h).build());
-        y += 26;
-
-        addRenderableWidget(Button.builder(stashMsg(), b -> {
-            c.cycleStashLevel();
-            b.setMessage(stashMsg());
-        }).bounds(x, y, w, h).build());
-        y += 26;
-
-        addRenderableWidget(Button.builder(oreEspMsg(), b -> {
-            c.cycleOreEsp();
-            b.setMessage(oreEspMsg());
-        }).bounds(x, y, w, h).build());
-        y += 26;
-
-        addRenderableWidget(Button.builder(stashPauseMsg(), b -> {
-            c.cycleStashPause();
-            b.setMessage(stashPauseMsg());
-        }).bounds(x, y, w, h).build());
-        y += 26;
-
-        addRenderableWidget(Button.builder(turnMsg(), b -> {
-            c.cycleTurn();
-            b.setMessage(turnMsg());
-        }).bounds(x, y, w, h).build());
-        y += 26;
-
-        addRenderableWidget(Button.builder(glanceMsg(), b -> {
-            c.cycleGlance();
-            b.setMessage(glanceMsg());
-        }).bounds(x, y, w, h).build());
-        y += 26;
-
-        addRenderableWidget(Button.builder(sweepMsg(), b -> {
-            c.cycleSweepStep();
-            b.setMessage(sweepMsg());
-        }).bounds(x, y, w, h).build());
-        y += 26;
-
-        addRenderableWidget(Button.builder(oreMsg(), b -> {
-            c.cycleOreSeek();
-            b.setMessage(oreMsg());
-        }).bounds(x, y, w, h).build());
-        y += 26;
-
-        addRenderableWidget(Button.builder(oneByOneMsg(), b -> {
-            c.cycleOneByOne();
-            b.setMessage(oneByOneMsg());
-        }).bounds(x, y, w, h).build());
-        y += 26;
-
-        addRenderableWidget(Button.builder(paceMsg(), b -> {
-            c.cyclePace();
-            b.setMessage(paceMsg());
-        }).bounds(x, y, w, h).build());
-        y += 26;
-
-        addRenderableWidget(Button.builder(skipBasesMsg(), b -> {
-            c.cycleSkipBases();
-            b.setMessage(skipBasesMsg());
-        }).bounds(x, y, w, h).build());
-        y += 26;
-
-        addRenderableWidget(Button.builder(autoSellMsg(), b -> {
-            c.cycleAutoSell();
-            b.setMessage(autoSellMsg());
-        }).bounds(x, y, w, h).build());
-        y += 26;
-
-        addRenderableWidget(Button.builder(skipRaidedMsg(), b -> {
-            c.cycleSkipRaided();
-            b.setMessage(skipRaidedMsg());
-        }).bounds(x, y, w, h).build());
-        y += 26;
-
-        addRenderableWidget(Button.builder(Component.literal("Clear base waypoints"), b -> {
+            this.rebuildWidgets();   // refresh all labels; scroll is preserved (field)
+        });
+        addRow(modeMsg(), b -> { c.cycleMode(); b.setMessage(modeMsg()); });
+        addRow(stashMsg(), b -> { c.cycleStashLevel(); b.setMessage(stashMsg()); });
+        addRow(oreEspMsg(), b -> { c.cycleOreEsp(); b.setMessage(oreEspMsg()); });
+        addRow(stashPauseMsg(), b -> { c.cycleStashPause(); b.setMessage(stashPauseMsg()); });
+        addRow(turnMsg(), b -> { c.cycleTurn(); b.setMessage(turnMsg()); });
+        addRow(glanceMsg(), b -> { c.cycleGlance(); b.setMessage(glanceMsg()); });
+        addRow(sweepMsg(), b -> { c.cycleSweepStep(); b.setMessage(sweepMsg()); });
+        addRow(oreMsg(), b -> { c.cycleOreSeek(); b.setMessage(oreMsg()); });
+        addRow(oneByOneMsg(), b -> { c.cycleOneByOne(); b.setMessage(oneByOneMsg()); });
+        addRow(paceMsg(), b -> { c.cyclePace(); b.setMessage(paceMsg()); });
+        addRow(skipBasesMsg(), b -> { c.cycleSkipBases(); b.setMessage(skipBasesMsg()); });
+        addRow(autoSellMsg(), b -> { c.cycleAutoSell(); b.setMessage(autoSellMsg()); });
+        addRow(skipRaidedMsg(), b -> { c.cycleSkipRaided(); b.setMessage(skipRaidedMsg()); });
+        addRow(Component.literal("Clear base waypoints"), b -> {
             int n = com.otto.cyclea.feature.MinimapBridge.clearBaseWaypoints();
             b.setMessage(Component.literal("Cleared " + n + " base waypoint" + (n == 1 ? "" : "s")));
-        }).bounds(x, y, w, h).build());
-        y += 40;
+        });
 
+        // fixed Done
         addRenderableWidget(Button.builder(Component.literal("Done"), b -> this.onClose())
-            .bounds(x, y, w, h).build());
+            .bounds(rowX, doneY, ROW_W, BTN_H).build());
+
+        scroll = Mth.clamp(scroll, 0, maxScroll());
+        relayout();
+    }
+
+    private void addRow(Component msg, Button.OnPress onPress) {
+        Button btn = Button.builder(msg, onPress).bounds(rowX, viewTop, ROW_W, BTN_H).build();
+        rows.add(btn);
+        addRenderableWidget(btn);
+    }
+
+    private int maxScroll() {
+        return Math.max(0, rows.size() * ROW_H - (viewBottom - viewTop));
+    }
+
+    /** Position each row by the scroll offset; hide any that fall outside the viewport. */
+    private void relayout() {
+        for (int i = 0; i < rows.size(); i++) {
+            Button b = rows.get(i);
+            int y = viewTop - scroll + i * ROW_H;
+            b.setY(y);
+            boolean vis = y >= viewTop - 1 && y + BTN_H <= viewBottom + 1;
+            b.visible = vis;
+            b.active = vis;
+        }
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        scroll = Mth.clamp(scroll - (int) Math.round(scrollY) * ROW_H, 0, maxScroll());
+        relayout();
+        return true;
     }
 
     private Component presetMsg() {
