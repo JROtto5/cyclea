@@ -434,6 +434,9 @@ public final class Autopilot {
         farmScanCd = 0;
         farmSeekY = Double.NaN;
         farmSeekTicks = 0;
+        farmPath = null;
+        farmPathIdx = 0;
+        farmRepathCd = 0;
         sellCd = 0;
         sellState = 0;
         sellWaitTicks = 0;
@@ -1780,6 +1783,9 @@ public final class Autopilot {
     private BlockPos farmFar = null;      // cached far cane target
     private double farmSeekY = Double.NaN; // player Y when we started seeking the staircase
     private int farmSeekTicks = 0;         // how long we've been climbing without progress
+    private java.util.List<BlockPos> farmPath = null;   // A* route to the target cane
+    private int farmPathIdx = 0;
+    private int farmRepathCd = 0;
 
     private BlockPos nearestStairs(Minecraft mc, int r) {
         BlockPos feet = mc.player.blockPosition();
@@ -1860,37 +1866,50 @@ public final class Autopilot {
             return;
         }
 
-        // ROOMBA: walk straight holding left-click at cane height; at a wall, turn a
-        // consistent way and COMMIT to it (no re-deciding every tick = no spinning); climb
-        // any step (so it rides the staircase to other floors just by walking into it).
+        // find the nearest ready cane (throttled), then A* a real route to it
         BlockPos feet = p.blockPosition();
-        if (farmDir == null) {
-            farmDir = Direction.from2DDataValue(rng.nextInt(4));
+        if (--farmScanCd <= 0) {
+            farmFar = nearestHarvestCane(mc, 24, false);
+            farmScanCd = 10;
         }
-        // pick a new heading only when blocked or the commit timer runs out
-        if (!farmWalkable(mc, feet, farmDir) || --farmWanderTicks <= 0) {
-            Direction[] opts = {                         // right-hand wall follow, then reverse
-                farmDir.getClockWise(), farmDir, farmDir.getCounterClockWise(), farmDir.getOpposite()
-            };
-            Direction chosen = farmDir.getOpposite();    // dead-end fallback: turn around
-            for (Direction o : opts) {
-                if (farmWalkable(mc, feet, o)) {
-                    chosen = o;
-                    break;
-                }
-            }
-            farmDir = chosen;
-            farmWanderTicks = 24 + rng.nextInt(24);      // commit ~1.5–2.4s so it can't spin
+        BlockPos target = farmFar;
+        if (target == null || !isCaneSegment(mc, target)) {
+            key(mc, mc.options.keyAttack, false);
+            wanderFarm(mc);                 // no cane in range — roam to find some
+            return;
         }
-        aim(p, farmDir.toYRot(), 0f);                    // look level — mows cane at body height
-        key(mc, mc.options.keySprint, false);
-        key(mc, mc.options.keyUp, true);
-        key(mc, mc.options.keyJump, solidStep(mc, feet.relative(farmDir)) && !p.isInWater());
 
-        // swing ONLY when the crosshair is on cane — never chew carpet/water/structure
+        // (re)plan a path to the cane across the walkways/stairs
+        if (farmPath == null || farmPathIdx >= farmPath.size() || --farmRepathCd <= 0) {
+            farmPath = Pathfinder.findFarm(mc, feet, target);
+            farmPathIdx = 0;
+            farmRepathCd = 40;
+        }
+
+        // swing only when the crosshair is on cane (mows as it goes; never breaks structure)
         boolean onCane = mc.hitResult instanceof BlockHitResult bhr
             && mc.level.getBlockState(bhr.getBlockPos()).is(Blocks.SUGAR_CANE);
         key(mc, mc.options.keyAttack, onCane);
+        key(mc, mc.options.keySprint, false);
+
+        if (farmPath == null || farmPath.isEmpty()) {
+            wanderFarm(mc);                 // couldn't route — roam briefly, then re-scan
+            return;
+        }
+
+        // follow the path node by node
+        BlockPos node = farmPath.get(Math.min(farmPathIdx, farmPath.size() - 1));
+        double ndx = node.getX() + 0.5 - p.getX();
+        double ndz = node.getZ() + 0.5 - p.getZ();
+        if (ndx * ndx + ndz * ndz < 1.3 && Math.abs(node.getY() - feet.getY()) <= 1) {
+            farmPathIdx++;                  // reached this node — advance
+            if (farmPathIdx >= farmPath.size()) {
+                farmPath = null;            // arrived at the cane; harvest happens via onCane
+                return;
+            }
+            node = farmPath.get(farmPathIdx);
+        }
+        walkToward(mc, node.getX() + 0.5, node.getZ() + 0.5, node.getY() > feet.getY());
     }
 
     /** Can we step one block in {@code dir} — no wall, no wading into water, floor to
