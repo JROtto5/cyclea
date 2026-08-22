@@ -74,6 +74,9 @@ public final class Autopilot {
     private double lastProgX = Double.NaN;   // anti-stuck progress tracking
     private double lastProgZ = Double.NaN;
     private int stuckTicks = 0;
+    private double idleX = Double.NaN;        // activity watchdog (catches any freeze)
+    private double idleZ = Double.NaN;
+    private int idleTicks = 0;
     private int jumpTicks = 0;
     private double blocksTraveled = 0;    // session stats
     private long sessionStart = 0;
@@ -258,6 +261,9 @@ public final class Autopilot {
         lastProgX = Double.NaN;
         lastProgZ = Double.NaN;
         stuckTicks = 0;
+        idleX = Double.NaN;
+        idleZ = Double.NaN;
+        idleTicks = 0;
         jumpTicks = 0;
         botYaw = Float.NaN;
         manualPauseTicks = 0;
@@ -364,6 +370,39 @@ public final class Autopilot {
             return;
         }
         paceCounter = 0;
+
+        // ACTIVITY WATCHDOG: whatever branch we're in, if the bot has genuinely not
+        // moved for a while (and isn't mid-eat), assume it's wedged in some state and
+        // force a fresh sweep leg. This runs BEFORE every early-return branch below, so
+        // it catches freezes the position-based anti-stuck (further down) never reaches.
+        // It's the "never just sits there" backstop.
+        if (Double.isNaN(idleX)) {
+            idleX = player.getX();
+            idleZ = player.getZ();
+        }
+        if (eating || Math.hypot(player.getX() - idleX, player.getZ() - idleZ) > 0.5) {
+            idleX = player.getX();
+            idleZ = player.getZ();
+            idleTicks = 0;
+        } else {
+            idleTicks++;
+        }
+        if (idleTicks >= 120) {          // ~6s of no movement at all — kick it back into motion
+            idleTicks = 0;
+            approaching = false;
+            path = null;
+            pathIndex = 0;
+            eating = false;
+            eatingTicks = 0;
+            mining = null;
+            breakingPos = null;
+            stuckTicks = 0;
+            key(mc, mc.options.keyUse, false);
+            key(mc, mc.options.keyAttack, false);
+            newLeg(mc);                  // pick a fresh heading and get moving again
+            say(mc, "§7(watchdog: stalled — resweeping)");
+            return;
+        }
 
         // gentle random-walk drift so the aim looks human, not machine-locked
         driftYaw = Mth.clamp(driftYaw + (rng.nextDouble() - 0.5) * 0.35, -1.5, 1.5);
