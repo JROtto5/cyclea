@@ -79,6 +79,7 @@ public final class Autopilot {
     private double idleZ = Double.NaN;
     private int idleTicks = 0;
     private BlockPos pillarSpot = null;       // spot to fill mid-jump when climbing out of Y-60
+    private int climbTicks = 0;               // how long we've been climbing out of a dip
     private int jumpTicks = 0;
     private double blocksTraveled = 0;    // session stats
     private long sessionStart = 0;
@@ -318,6 +319,7 @@ public final class Autopilot {
         idleZ = Double.NaN;
         idleTicks = 0;
         pillarSpot = null;
+        climbTicks = 0;
         deadTicks = 0;
         aliveX = Double.NaN;
         aliveInv = -1;
@@ -551,30 +553,36 @@ public final class Autopilot {
         //      made it "never figure out Y-60"). Works whether grounded OR airborne.
         BlockPos feetC = player.blockPosition();
         if (feetC.getY() < targetY) {
+            climbTicks++;
             key(mc, mc.options.keyUp, false);
+
+            // (a) FIRST ~0.8s: try to walk-jump up onto adjacent higher ground (usually
+            //     the tunnel we came from). Sprint-jump so it actually mounts the block.
+            if (climbTicks < 16) {
+                Direction stepUp = findStepUp(mc, feetC);
+                if (stepUp != null) {
+                    aim(player, stepUp.toYRot(), -6f);   // face the step, look slightly up
+                    key(mc, mc.options.keyUp, true);
+                    key(mc, mc.options.keySprint, true);
+                    key(mc, mc.options.keyJump, true);
+                    return;
+                }
+            }
             key(mc, mc.options.keySprint, false);
 
-            // (a) BEST: step onto adjacent higher ground (usually the tunnel we came
-            //     from, one block up). No blocks needed. Check cardinals + diagonals.
-            Direction stepUp = findStepUp(mc, feetC);
-            if (stepUp != null) {
-                aimAtFast(player, Vec3.atCenterOf(feetC.relative(stepUp)));
-                key(mc, mc.options.keyUp, true);
-                key(mc, mc.options.keyJump, true);
-                return;
-            }
-
-            // (b) clear the ceiling so we can rise in place
+            // (b) clear any ceiling that would block rising
             BlockPos head2 = feetC.above(2);
             if (canMine(mc, head2)) {
                 swingAt(mc, head2);
                 return;
             }
 
-            // (c) PILLAR: jump and fill the cell under us so we land a level higher.
+            // (c) PILLAR up — reliable ANYWHERE as long as we have a block (we keep a
+            //     cobbled-deepslate building stock). Jump, then fill the vacated cell
+            //     mid-air so we land a level higher. This is the guaranteed escape.
             if (player.onGround()) {
                 if (ensureHotbarBlock(mc)) {
-                    pillarSpot = feetC;    // fill it next tick, mid-air
+                    pillarSpot = feetC;
                 }
                 key(mc, mc.options.keyJump, true);
             } else if (pillarSpot != null) {
@@ -585,6 +593,7 @@ public final class Autopilot {
             }
             return;
         }
+        climbTicks = 0;
         pillarSpot = null;   // at/above target depth — no pillar pending
 
         // 1c) inventory full — never just stop. First cash out with the server sell
@@ -1257,7 +1266,10 @@ public final class Autopilot {
     /** True if {@code n} (at feet level) is a solid block we can jump up onto: solid,
      *  safe, with two air blocks above to stand in. */
     private boolean isStepUp(Minecraft mc, BlockPos n) {
-        return !passable(mc, n) && !hazard(mc, n) && !hasHazardNeighbor(mc, n)
+        // solid block we can stand on, with 2 air above. We're only STEPPING onto it, not
+        // breaking it, so a lava/water neighbour is fine — the old hazard-neighbour check
+        // here was rejecting almost every step in the Y-60 lava zone and wedging the bot.
+        return !passable(mc, n) && !hazard(mc, n)
             && passable(mc, n.above()) && passable(mc, n.above(2));
     }
 
