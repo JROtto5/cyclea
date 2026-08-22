@@ -1893,8 +1893,15 @@ public final class Autopilot {
             return;
         }
 
-        // this level is clear — go UP to the next one via a staircase or ladder
+        // no cane in reach — sweep up any dropped cane first so nothing's left behind
         key(mc, mc.options.keyAttack, false);
+        net.minecraft.world.entity.item.ItemEntity drop = nearestCaneDrop(mc, 14);
+        if (drop != null) {
+            walkToward(mc, drop.getX(), drop.getZ(), drop.getY() > feet.getY() + 0.5);
+            return;
+        }
+
+        // this level is clear — go UP to the next one via a staircase or ladder
         BlockPos stairs = nearestStairs(mc, 16);
         if (stairs != null) {
             walkToward(mc, stairs.getX() + 0.5, stairs.getZ() + 0.5, true);
