@@ -56,6 +56,7 @@ public class CycleaConfigScreen extends Screen {
         addRow(oreEspMsg(), b -> { c.cycleOreEsp(); b.setMessage(oreEspMsg()); });
         addRow(tracersMsg(), b -> { c.cycleTracers(); b.setMessage(tracersMsg()); });
         addRow(watchmanMsg(), b -> { c.cycleWatchman(); b.setMessage(watchmanMsg()); });
+        addRow(toolGuardMsg(), b -> { c.cycleToolGuard(); b.setMessage(toolGuardMsg()); });
         addRow(turnMsg(), b -> { c.cycleTurn(); b.setMessage(turnMsg()); });
         addRow(glanceMsg(), b -> { c.cycleGlance(); b.setMessage(glanceMsg()); });
         addRow(sweepMsg(), b -> { c.cycleSweepStep(); b.setMessage(sweepMsg()); });
@@ -129,6 +130,10 @@ public class CycleaConfigScreen extends Screen {
 
     private Component watchmanMsg() {
         return Component.literal("Watchman [G=seal]: " + CycleaConfig.get().watchmanLabel());
+    }
+
+    private Component toolGuardMsg() {
+        return Component.literal("Tool guard: " + CycleaConfig.get().toolGuardLabel());
     }
 
     private Component turnMsg() {

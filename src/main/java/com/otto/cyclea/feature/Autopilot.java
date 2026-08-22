@@ -753,6 +753,12 @@ public final class Autopilot {
             stop(mc, "§cno usable pickaxe left");
             return;
         }
+        // 4a) tool guard: it already swaps to a healthy pick automatically. If none is
+        //     left and it's grinding a worn one, warn you (and optionally stop) so a good
+        //     tool never gets mined to dust unnoticed.
+        if (guardTools(mc)) {
+            return;   // guard chose to stop
+        }
 
         // 4b) anti-stuck: it NEVER gives up — it escalates (shake → tower up →
         //     redirect) until it frees itself, so it should never need you.
@@ -2160,7 +2166,42 @@ public final class Autopilot {
     }
 
     private static boolean nearlyBroken(ItemStack s) {
-        return s.isDamageableItem() && (s.getMaxDamage() - s.getDamageValue()) < 20;
+        if (!s.isDamageableItem()) {
+            return false;
+        }
+        int left = s.getMaxDamage() - s.getDamageValue();
+        // swap early enough to protect the tool: under ~6% or under 25 uses
+        return left < Math.max(25, s.getMaxDamage() / 16);
+    }
+
+    private int toolAlertCd = 0;
+
+    /** Warn (and optionally stop) when the pickaxe is about to break with no healthy spare.
+     *  Returns true if it stopped. Swapping to a good tool is handled by ensurePickaxe. */
+    private boolean guardTools(Minecraft mc) {
+        int level = CycleaConfig.get().toolGuard;
+        if (level == 0) {
+            return false;
+        }
+        Inventory inv = mc.player.getInventory();
+        boolean healthySpare = findHotbar(inv, s -> isPickaxe(s) && !nearlyBroken(s)) >= 0;
+        ItemStack held = inv.getSelectedItem();
+        if (!(isPickaxe(held) && nearlyBroken(held)) || healthySpare) {
+            return false;   // fine — either healthy, or a spare is ready to swap in
+        }
+        if (toolAlertCd > 0) {
+            toolAlertCd--;
+        } else {
+            int left = held.getMaxDamage() - held.getDamageValue();
+            mc.player.playSound(net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 0.4f);
+            say(mc, "§c⚠ pickaxe almost broken §7(" + left + " uses left) §c— no spare in the hotbar!");
+            toolAlertCd = 100;   // ~5s between warnings
+        }
+        if (level == 2) {
+            stop(mc, "§cpickaxe about to break — give me a fresh one, then press O");
+            return true;
+        }
+        return false;
     }
 
     private static boolean passable(Minecraft mc, BlockPos pos) {

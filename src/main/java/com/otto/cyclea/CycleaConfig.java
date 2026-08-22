@@ -131,6 +131,23 @@ public final class CycleaConfig {
         save();
     }
 
+    // tool guard: 0 = off, 1 = alert when a pick's about to break with no spare (default),
+    // 2 = also stop and hand off. (Swapping to a healthy tool is always automatic.)
+    public int toolGuard = 1;
+
+    public void cycleToolGuard() {
+        toolGuard = (toolGuard + 1) % 3;
+        save();
+    }
+
+    public String toolGuardLabel() {
+        return switch (toolGuard) {
+            case 0 -> "Off";
+            case 2 -> "Alert + stop";
+            default -> "Alert only";
+        };
+    }
+
     // Watchman: warn when another player comes within range while you're underground
     public boolean watchman = true;
 
@@ -344,6 +361,7 @@ public final class CycleaConfig {
                 oreSeekLevel = Integer.parseInt(p.getProperty("oreSeekLevel", "1"));
                 oneByOne = Boolean.parseBoolean(p.getProperty("oneByOne", "false"));
                 paceLevel = Integer.parseInt(p.getProperty("paceLevel", "1"));
+                toolGuard = Integer.parseInt(p.getProperty("toolGuard", "1"));
                 watchman = Boolean.parseBoolean(p.getProperty("watchman", "true"));
                 oreEsp = Boolean.parseBoolean(p.getProperty("oreEsp", "true"));
                 tracers = Boolean.parseBoolean(p.getProperty("tracers", "true"));
@@ -371,6 +389,7 @@ public final class CycleaConfig {
         p.setProperty("oreSeekLevel", Integer.toString(oreSeekLevel));
         p.setProperty("oneByOne", Boolean.toString(oneByOne));
         p.setProperty("paceLevel", Integer.toString(paceLevel));
+        p.setProperty("toolGuard", Integer.toString(toolGuard));
         p.setProperty("watchman", Boolean.toString(watchman));
         p.setProperty("oreEsp", Boolean.toString(oreEsp));
         p.setProperty("tracers", Boolean.toString(tracers));
