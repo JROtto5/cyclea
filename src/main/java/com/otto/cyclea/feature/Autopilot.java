@@ -1848,49 +1848,64 @@ public final class Autopilot {
         return best;
     }
 
-    /** One tick of sugarcane farming: sell a full pile, else harvest / walk / climb. */
+    /** Sugarcane farming, built like the miner: find the nearest cane, walk to it, mine
+     *  it (aim + hold attack), climb to the next level when this one's clear, sell a pile. */
     private void farmStep(Minecraft mc) {
         var p = mc.player;
         if (handleEating(mc)) {
+            key(mc, mc.options.keyAttack, false);
             return;
         }
         // sell when we've built a good pile of cane (or the pack is filling up)
-        int cane = countItem(p, "sugar_cane");
+        int caneCount = countItem(p, "sugar_cane");
         if (sellState == 0 && CycleaConfig.get().autoSell
-            && (cane >= 192 || p.getInventory().getFreeSlot() < 0)) {
+            && (caneCount >= 192 || p.getInventory().getFreeSlot() < 0)) {
             mc.player.connection.sendCommand(CycleaConfig.get().sellCommand.replaceFirst("^/", ""));
             farmSelling = true;
             sellState = 1;
             sellWaitTicks = 0;
-            say(mc, "§e/" + CycleaConfig.get().sellCommand + " §7— selling " + cane + " cane…");
+            key(mc, mc.options.keyAttack, false);
+            say(mc, "§e/" + CycleaConfig.get().sellCommand + " §7— selling " + caneCount + " cane…");
             return;
         }
 
-        // DEAD SIMPLE: walk straight holding left-click at cane height. Turn ONLY when a
-        // wall is in the way (deterministic right-hand turn = tidy lanes, no spinning, no
-        // wandering off after distant cane). Climb any step so it rides the staircase.
         BlockPos feet = p.blockPosition();
-        if (farmDir == null) {
-            farmDir = p.getDirection();
+        // nearest ready cane on THIS level (throttled scan, cached)
+        if (--farmScanCd <= 0) {
+            farmFar = nearestHarvestCane(mc, feet, 24);
+            farmScanCd = 4;
         }
-        if (!farmWalkable(mc, feet, farmDir)) {
-            for (Direction o : new Direction[]{
-                farmDir.getClockWise(), farmDir.getCounterClockWise(), farmDir.getOpposite()}) {
-                if (farmWalkable(mc, feet, o)) {
-                    farmDir = o;
-                    break;
-                }
-            }
-        }
-        aim(p, farmDir.toYRot(), 0f);          // look level — mows the row at body height
-        key(mc, mc.options.keyUp, true);
-        key(mc, mc.options.keySprint, false);
-        key(mc, mc.options.keyJump, solidStep(mc, feet.relative(farmDir)) && !p.isInWater());
+        BlockPos cane = (farmFar != null && isCaneSegment(mc, farmFar)) ? farmFar : null;
 
-        // swing ONLY when the crosshair is on cane — never break carpet/structure
-        boolean onCane = mc.hitResult instanceof BlockHitResult bhr
-            && mc.level.getBlockState(bhr.getBlockPos()).is(Blocks.SUGAR_CANE);
-        key(mc, mc.options.keyAttack, onCane);
+        if (cane != null) {
+            Vec3 c = center(cane);
+            if (p.getEyePosition().distanceToSqr(c) <= 20.0) {
+                // in reach — MINE it exactly like the miner: aim, then hold attack
+                key(mc, mc.options.keyUp, false);
+                key(mc, mc.options.keySprint, false);
+                aimAtFast(p, c);
+                key(mc, mc.options.keyAttack, facing(p, c, 30f));   // swing once pointed at it
+            } else {
+                // walk to it (toward the cane — never away from it)
+                key(mc, mc.options.keyAttack, false);
+                walkToward(mc, cane.getX() + 0.5, cane.getZ() + 0.5, cane.getY() > feet.getY());
+            }
+            return;
+        }
+
+        // this level is clear — go UP to the next one via a staircase or ladder
+        key(mc, mc.options.keyAttack, false);
+        BlockPos stairs = nearestStairs(mc, 16);
+        if (stairs != null) {
+            walkToward(mc, stairs.getX() + 0.5, stairs.getZ() + 0.5, true);
+            return;
+        }
+        BlockPos lad = nearestLadder(mc, 8, true);
+        if (lad != null) {
+            climbLadder(mc, lad, true);
+            return;
+        }
+        wanderFarm(mc);   // no stairs/ladder found — roam to locate them
     }
 
     /** Can we step one block in {@code dir} — no wall, no wading into water, floor to
@@ -1924,16 +1939,15 @@ public final class Autopilot {
         return n;
     }
 
-    /** Nearest harvestable cane (a sugar_cane with sugar_cane directly below it). */
-    private BlockPos nearestHarvestCane(Minecraft mc, int r, boolean reachable) {
-        var p = mc.player;
-        BlockPos feet = p.blockPosition();
-        Vec3 eye = p.getEyePosition();
+    /** Nearest harvestable cane on THIS level (a sugar_cane with sugar_cane below it,
+     *  within a tight vertical band so it clears the current floor before going up). */
+    private BlockPos nearestHarvestCane(Minecraft mc, BlockPos feet, int r) {
+        Vec3 eye = mc.player.getEyePosition();
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
         BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
         for (int dx = -r; dx <= r; dx++) {
-            for (int dy = -8; dy <= 10; dy++) {   // sees a couple floors up/down → heads for stairs
+            for (int dy = -1; dy <= 4; dy++) {   // current level only (cane grows a few up)
                 for (int dz = -r; dz <= r; dz++) {
                     m.set(feet.getX() + dx, feet.getY() + dy, feet.getZ() + dz);
                     if (!mc.level.getBlockState(m).is(Blocks.SUGAR_CANE)
@@ -1941,9 +1955,6 @@ public final class Autopilot {
                         continue;   // only cut segments that sit on more cane (leave the base)
                     }
                     double d = eye.distanceToSqr(Vec3.atCenterOf(m));
-                    if (reachable && d > 20.0) {
-                        continue;   // ~4.5 block reach
-                    }
                     if (d < bestD) {
                         bestD = d;
                         best = m.immutable();
