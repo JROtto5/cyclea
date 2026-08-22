@@ -432,6 +432,8 @@ public final class Autopilot {
         farmFar = null;
         farmActCd = 0;
         farmScanCd = 0;
+        farmSeekY = Double.NaN;
+        farmSeekTicks = 0;
         sellCd = 0;
         sellState = 0;
         sellWaitTicks = 0;
@@ -1776,6 +1778,32 @@ public final class Autopilot {
     private int farmActCd = 0;            // harvest pacing (~5/sec)
     private int farmScanCd = 0;           // throttle the wide cane scan
     private BlockPos farmFar = null;      // cached far cane target
+    private double farmSeekY = Double.NaN; // player Y when we started seeking the staircase
+    private int farmSeekTicks = 0;         // how long we've been climbing without progress
+
+    private BlockPos nearestStairs(Minecraft mc, int r) {
+        BlockPos feet = mc.player.blockPosition();
+        BlockPos best = null;
+        double bestD = Double.MAX_VALUE;
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dy = -4; dy <= 4; dy++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    m.set(feet.getX() + dx, feet.getY() + dy, feet.getZ() + dz);
+                    if (!BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(m).getBlock())
+                        .getPath().endsWith("_stairs")) {
+                        continue;
+                    }
+                    double d = dx * dx + dz * dz;
+                    if (d < bestD) {
+                        bestD = d;
+                        best = m.immutable();
+                    }
+                }
+            }
+        }
+        return best;
+    }
 
     private boolean isCaneSegment(Minecraft mc, BlockPos pos) {
         return mc.level.getBlockState(pos).is(Blocks.SUGAR_CANE)
@@ -1846,6 +1874,7 @@ public final class Autopilot {
             farmTarget = nearestHarvestCane(mc, 5, true);
         }
         if (farmTarget != null) {
+            farmSeekY = Double.NaN;   // harvesting this floor — reset the stair-seek timer
             key(mc, mc.options.keyUp, false);
             key(mc, mc.options.keySprint, false);
             Vec3 c = center(farmTarget);
@@ -1876,23 +1905,36 @@ public final class Autopilot {
                 farmFar.getY() > p.blockPosition().getY());
             return;
         }
-        // this level's cane is gone — PATROL: ride ladders up to the top, then back down,
-        // so every layer gets re-harvested as it regrows.
-        BlockPos ladUp = nearestLadder(mc, 6, true);
-        BlockPos ladDown = nearestLadder(mc, 6, false);
-        if (farmGoingUp) {
-            if (ladUp != null) {
-                climbLadder(mc, ladUp, true);
-                return;
+        // this level's cane is gone — PATROL to the next floor. Prefer the staircase
+        // (walk it up/down), fall back to ladders. Flip up<->down when height stops
+        // changing (we've hit the top or bottom).
+        BlockPos stairs = nearestStairs(mc, 12);
+        BlockPos lad = nearestLadder(mc, 6, farmGoingUp);
+        if (stairs != null || lad != null) {
+            if (Double.isNaN(farmSeekY)) {
+                farmSeekY = p.getY();
+                farmSeekTicks = 0;
             }
-            farmGoingUp = false;   // no ladder up — top reached, head down
-        }
-        if (ladDown != null) {
-            climbLadder(mc, ladDown, false);
+            farmSeekTicks++;
+            boolean progressed = farmGoingUp ? p.getY() > farmSeekY + 0.6 : p.getY() < farmSeekY - 0.6;
+            if (progressed) {
+                farmSeekY = p.getY();
+                farmSeekTicks = 0;
+            } else if (farmSeekTicks > 70) {   // ~3.5s no vertical progress → top/bottom
+                farmGoingUp = !farmGoingUp;
+                farmSeekY = p.getY();
+                farmSeekTicks = 0;
+            }
+            if (stairs != null) {
+                walkToward(mc, stairs.getX() + 0.5, stairs.getZ() + 0.5, farmGoingUp);
+            } else {
+                climbLadder(mc, lad, farmGoingUp);
+            }
             return;
         }
-        farmGoingUp = true;        // no ladder down either — bottom reached, head up
-        // nothing to climb — wander this level to find more cane
+        // no stairs/ladder in range — wander this floor to find them
+        farmSeekY = Double.NaN;
+        farmSeekTicks = 0;
         wanderFarm(mc);
     }
 
