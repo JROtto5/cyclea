@@ -1811,9 +1811,16 @@ public final class Autopilot {
         return best;
     }
 
+    /** A cane segment worth cutting: it sits above the base AND its column is fully grown
+     *  (≥3 tall). Ignoring 1–2 tall regrowth is what stops it turning back and spinning. */
     private boolean isCaneSegment(Minecraft mc, BlockPos pos) {
-        return mc.level.getBlockState(pos).is(Blocks.SUGAR_CANE)
-            && mc.level.getBlockState(pos.below()).is(Blocks.SUGAR_CANE);
+        if (!mc.level.getBlockState(pos).is(Blocks.SUGAR_CANE)
+            || !mc.level.getBlockState(pos.below()).is(Blocks.SUGAR_CANE)) {
+            return false;   // must be above the base block
+        }
+        // mature column only: another cane two below, or one above (so total height ≥3)
+        return mc.level.getBlockState(pos.below().below()).is(Blocks.SUGAR_CANE)
+            || mc.level.getBlockState(pos.above()).is(Blocks.SUGAR_CANE);
     }
 
     /** Are we looking within {@code tol}° of point {@code t}? */
@@ -1959,9 +1966,8 @@ public final class Autopilot {
             for (int dy = loDy; dy <= hiDy; dy++) {
                 for (int dz = -r; dz <= r; dz++) {
                     m.set(feet.getX() + dx, feet.getY() + dy, feet.getZ() + dz);
-                    if (!mc.level.getBlockState(m).is(Blocks.SUGAR_CANE)
-                        || !mc.level.getBlockState(m.below()).is(Blocks.SUGAR_CANE)) {
-                        continue;   // only cut segments that sit on more cane (leave the base)
+                    if (!isCaneSegment(mc, m)) {
+                        continue;   // only mature (≥3 tall) columns, above the base
                     }
                     double d = eye.distanceToSqr(Vec3.atCenterOf(m));
                     if (d < bestD) {
