@@ -329,6 +329,8 @@ public final class Autopilot {
         alertedStashes.clear();
         pendingOre = null;
         sellCd = 0;
+        sellState = 0;
+        sellWaitTicks = 0;
         jumpTicks = 0;
         botYaw = Float.NaN;
         manualPauseTicks = 0;
@@ -402,6 +404,17 @@ public final class Autopilot {
         if (!active || mc.player == null || mc.level == null) {
             return;
         }
+        // SELLING: if we're mid-way through operating the server's /sell GUI, do only
+        // that (the player is in a menu; normal driving + the watchdog must stand down).
+        if (sellState != 0) {
+            try {
+                handleSell(mc);
+            } catch (Throwable t) {
+                sellState = 0;
+            }
+            return;
+        }
+
         // HARD WATCHDOG: if it's genuinely frozen (not moving AND not mining anything),
         // auto-restart the whole thing — same as you toggling off/on, but automatic.
         // You should never have to babysit it.
@@ -603,10 +616,12 @@ public final class Autopilot {
             sellCd--;
         }
         if (player.getInventory().getFreeSlot() < 0) {
-            if (CycleaConfig.get().autoSell && sellCd == 0) {
+            if (CycleaConfig.get().autoSell && sellCd == 0 && sellState == 0) {
+                // open the server's /sell GUI; handleSell() fills it with mined items + ESC
                 mc.player.connection.sendCommand(CycleaConfig.get().sellCommand.replaceFirst("^/", ""));
-                say(mc, "§e/" + CycleaConfig.get().sellCommand + " §7— cashing out a full inventory");
-                sellCd = 60;   // ~3s before we try again
+                say(mc, "§e/" + CycleaConfig.get().sellCommand + " §7— opening sell menu…");
+                sellState = 1;
+                sellWaitTicks = 0;
                 return;
             }
             if (dumpBulk(mc)) {
@@ -1284,7 +1299,77 @@ public final class Autopilot {
 
     /** Building blocks we keep a stock of (from mining) to bridge/pillar/wall with. */
     private static final java.util.Set<String> BUILD = java.util.Set.of("cobbled_deepslate", "cobblestone");
+
+    /** Only-mined items we'll drop into the server /sell GUI (never tools/food/emerald-currency).
+     *  Anything ending in "_ore" also qualifies. Emerald is excluded on purpose (it's money). */
+    private static final java.util.Set<String> MINED = java.util.Set.of(
+        "diamond", "raw_iron", "raw_gold", "raw_copper", "iron_ingot", "gold_ingot", "copper_ingot",
+        "redstone", "lapis_lazuli", "coal", "quartz", "amethyst_shard", "netherite_scrap",
+        "ancient_debris", "flint", "glowstone_dust", "glowstone",
+        "cobbled_deepslate", "deepslate", "cobblestone", "stone", "granite", "diorite",
+        "andesite", "tuff", "calcite", "dripstone_block", "gravel", "dirt", "netherrack");
+
     private int sellCd = 0;
+    private int sellState = 0;      // 0 idle, 1 waiting for the GUI to open, 2 fill+confirm
+    private int sellWaitTicks = 0;
+
+    private static boolean isMined(ItemStack s) {
+        String p = itemPath(s);
+        return MINED.contains(p) || p.endsWith("_ore");
+    }
+
+    /** Drive the server's /sell chest-GUI: wait for it to open, shift the mined items in,
+     *  then close (ESC) to confirm the sale. Keeps one building stack back. */
+    private void handleSell(Minecraft mc) {
+        var player = mc.player;
+        if (sellState == 1) {
+            // waiting for the server to open the sell menu
+            if (player.containerMenu != null && player.containerMenu.containerId != 0) {
+                sellState = 2;
+            } else if (++sellWaitTicks > 60) {
+                sellState = 0;   // never opened — step() will fall back to dumping
+                say(mc, "§7sell menu didn't open — I'll dump instead");
+            }
+            return;
+        }
+        // sellState == 2: fill the menu with mined items, then confirm
+        var menu = player.containerMenu;
+        if (menu == null || menu.containerId == 0) {
+            sellState = 0;
+            return;
+        }
+        int buildStacks = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = player.getInventory().getItem(i);
+            if (!s.isEmpty() && BUILD.contains(itemPath(s))) {
+                buildStacks++;
+            }
+        }
+        int moved = 0;
+        for (int i = 0; i < menu.slots.size(); i++) {
+            var slot = menu.slots.get(i);
+            if (slot.container != player.getInventory() || !slot.hasItem()) {
+                continue;   // only shift OUR inventory items, not the sell slots
+            }
+            ItemStack s = slot.getItem();
+            if (!isMined(s)) {
+                continue;   // tools, food, emeralds (money), torches — leave them
+            }
+            if (BUILD.contains(itemPath(s)) && buildStacks <= 1) {
+                continue;   // keep one building stack for pillaring/bridging
+            }
+            if (BUILD.contains(itemPath(s))) {
+                buildStacks--;
+            }
+            mc.gameMode.handleContainerInput(menu.containerId, i, 0,
+                net.minecraft.world.inventory.ContainerInput.QUICK_MOVE, player);
+            moved++;
+        }
+        player.closeContainer();   // ESC → confirm the sale
+        sellState = 0;
+        sellCd = 60;               // ~3s before another sell
+        say(mc, "§a$ sold " + moved + " mined stack" + (moved == 1 ? "" : "s") + " §7— back to work");
+    }
 
     private static String itemPath(ItemStack s) {
         return BuiltInRegistries.ITEM.getKey(s.getItem()).getPath();

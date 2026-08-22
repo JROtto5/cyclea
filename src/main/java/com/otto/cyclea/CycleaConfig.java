@@ -126,7 +126,7 @@ public final class CycleaConfig {
 
     // when full, run a server sell command (e.g. /sell all) to cash out valuables
     public boolean autoSell = true;
-    public String sellCommand = "sell all";   // sent WITHOUT the leading slash
+    public String sellCommand = "sell";   // opens the server's sell GUI (sent WITHOUT the slash)
 
     public void cycleAutoSell() {
         autoSell = !autoSell;
@@ -313,7 +313,10 @@ public final class CycleaConfig {
                 oneByOne = Boolean.parseBoolean(p.getProperty("oneByOne", "false"));
                 paceLevel = Integer.parseInt(p.getProperty("paceLevel", "1"));
                 autoSell = Boolean.parseBoolean(p.getProperty("autoSell", "true"));
-                sellCommand = p.getProperty("sellCommand", "sell all");
+                sellCommand = p.getProperty("sellCommand", "sell");
+                if (sellCommand.equals("sell all")) {
+                    sellCommand = "sell";   // migrate old default: /sell opens a GUI, "sell all" doesn't
+                }
                 mode = Integer.parseInt(p.getProperty("mode", "0"));
                 stashLevel = Integer.parseInt(p.getProperty("stashLevel", "1"));
                 stashPause = Boolean.parseBoolean(p.getProperty("stashPause", "false"));
