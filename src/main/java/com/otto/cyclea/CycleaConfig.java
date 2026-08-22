@@ -148,6 +148,19 @@ public final class CycleaConfig {
         };
     }
 
+    // keep the bot driving even when a menu is open / you've tabbed out (server only;
+    // singleplayer still pauses at the ESC menu)
+    public boolean runWithMenus = true;
+
+    public void cycleRunWithMenus() {
+        runWithMenus = !runWithMenus;
+        save();
+    }
+
+    public String runWithMenusLabel() {
+        return runWithMenus ? "On (runs with menu open)" : "Off";
+    }
+
     // Watchman: warn when another player comes within range while you're underground
     public boolean watchman = true;
 
@@ -362,6 +375,7 @@ public final class CycleaConfig {
                 oneByOne = Boolean.parseBoolean(p.getProperty("oneByOne", "false"));
                 paceLevel = Integer.parseInt(p.getProperty("paceLevel", "1"));
                 toolGuard = Integer.parseInt(p.getProperty("toolGuard", "1"));
+                runWithMenus = Boolean.parseBoolean(p.getProperty("runWithMenus", "true"));
                 watchman = Boolean.parseBoolean(p.getProperty("watchman", "true"));
                 oreEsp = Boolean.parseBoolean(p.getProperty("oreEsp", "true"));
                 tracers = Boolean.parseBoolean(p.getProperty("tracers", "true"));
@@ -390,6 +404,7 @@ public final class CycleaConfig {
         p.setProperty("oneByOne", Boolean.toString(oneByOne));
         p.setProperty("paceLevel", Integer.toString(paceLevel));
         p.setProperty("toolGuard", Integer.toString(toolGuard));
+        p.setProperty("runWithMenus", Boolean.toString(runWithMenus));
         p.setProperty("watchman", Boolean.toString(watchman));
         p.setProperty("oreEsp", Boolean.toString(oreEsp));
         p.setProperty("tracers", Boolean.toString(tracers));

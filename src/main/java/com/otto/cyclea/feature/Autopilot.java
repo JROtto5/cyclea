@@ -473,6 +473,18 @@ public final class Autopilot {
                 stop(mc, "internal error (safe halt)");
             }
         }
+        // KEEP RUNNING WITH MENUS OPEN / TABBED OUT: when a screen is open the game stops
+        // feeding key-presses to the player, so mirror the bot's intended movement straight
+        // into the player input and drive block-breaking directly. Lets you hit ESC, free
+        // the cursor, and switch apps while it keeps mining (on a server — singleplayer
+        // still pauses the world at the ESC menu).
+        if (active && mc.player != null && screenOpen(mc) && CycleaConfig.get().runWithMenus) {
+            driveThroughMenu(mc);
+        } else if (menuBreakPos != null) {
+            mc.gameMode.stopDestroyBlock();
+            menuBreakPos = null;
+        }
+
         // Track the camera EVERY tick (even while paused) so we compare against the
         // most recent rotation, not a stale one. This is critical: if we only updated
         // when un-paused, a single mouse nudge would latch the pause ON forever (the
@@ -482,6 +494,43 @@ public final class Autopilot {
         if (active && mc.player != null) {
             botYaw = mc.player.getYRot();
             botPitch = mc.player.getXRot();
+        }
+    }
+
+    private BlockPos menuBreakPos = null;
+    private static java.lang.reflect.Field screenField;
+
+    /** Is a GUI screen open? Read via reflection (the field is private in this build). */
+    private static boolean screenOpen(Minecraft mc) {
+        try {
+            if (screenField == null) {
+                screenField = Minecraft.class.getDeclaredField("screen");
+                screenField.setAccessible(true);
+            }
+            return screenField.get(mc) != null;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** With a screen open, the game ignores our key-presses — so push movement into the
+     *  player input directly and break blocks via gameMode so the bot keeps working. */
+    private void driveThroughMenu(Minecraft mc) {
+        var o = mc.options;
+        mc.player.input.keyPresses = new net.minecraft.world.entity.player.Input(
+            o.keyUp.isDown(), o.keyDown.isDown(), o.keyLeft.isDown(), o.keyRight.isDown(),
+            o.keyJump.isDown(), o.keyShift.isDown(), o.keySprint.isDown());
+        if (o.keyAttack.isDown() && mining != null) {
+            Direction face = faceToward(mc, mining);
+            if (!mining.equals(menuBreakPos)) {
+                mc.gameMode.startDestroyBlock(mining, face);
+                menuBreakPos = mining;
+            } else {
+                mc.gameMode.continueDestroyBlock(mining, face);
+            }
+        } else if (menuBreakPos != null) {
+            mc.gameMode.stopDestroyBlock();
+            menuBreakPos = null;
         }
     }
 

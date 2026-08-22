@@ -57,6 +57,7 @@ public class CycleaConfigScreen extends Screen {
         addRow(tracersMsg(), b -> { c.cycleTracers(); b.setMessage(tracersMsg()); });
         addRow(watchmanMsg(), b -> { c.cycleWatchman(); b.setMessage(watchmanMsg()); });
         addRow(toolGuardMsg(), b -> { c.cycleToolGuard(); b.setMessage(toolGuardMsg()); });
+        addRow(runMenusMsg(), b -> { c.cycleRunWithMenus(); b.setMessage(runMenusMsg()); });
         addRow(turnMsg(), b -> { c.cycleTurn(); b.setMessage(turnMsg()); });
         addRow(glanceMsg(), b -> { c.cycleGlance(); b.setMessage(glanceMsg()); });
         addRow(sweepMsg(), b -> { c.cycleSweepStep(); b.setMessage(sweepMsg()); });
@@ -134,6 +135,10 @@ public class CycleaConfigScreen extends Screen {
 
     private Component toolGuardMsg() {
         return Component.literal("Tool guard: " + CycleaConfig.get().toolGuardLabel());
+    }
+
+    private Component runMenusMsg() {
+        return Component.literal("Run with menu open: " + CycleaConfig.get().runWithMenusLabel());
     }
 
     private Component turnMsg() {
