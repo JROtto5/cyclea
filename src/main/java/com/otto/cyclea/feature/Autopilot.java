@@ -266,6 +266,10 @@ public final class Autopilot {
         idleZ = Double.NaN;
         idleTicks = 0;
         pillarSpot = null;
+        deadTicks = 0;
+        aliveX = Double.NaN;
+        aliveInv = -1;
+        errStreak = 0;
         jumpTicks = 0;
         botYaw = Float.NaN;
         manualPauseTicks = 0;
@@ -334,16 +338,81 @@ public final class Autopilot {
         if (!active || mc.player == null || mc.level == null) {
             return;
         }
+        // HARD WATCHDOG: if it's genuinely frozen (not moving AND not mining anything),
+        // auto-restart the whole thing — same as you toggling off/on, but automatic.
+        // You should never have to babysit it.
+        if (frozenSoRestart(mc)) {
+            return;   // restarted this tick; run fresh next tick
+        }
         try {
             step(mc);
+            errStreak = 0;   // a clean tick clears the error streak
         } catch (Throwable t) {
-            stop(mc, "internal error (safe halt)");
+            // one hiccup shouldn't kill the run — swallow, release keys, keep going.
+            // Only truly halt if we error every tick for a while (something real is wrong).
+            errStreak++;
+            releaseAll(mc);
+            if (errStreak >= 40) {
+                errStreak = 0;
+                stop(mc, "internal error (safe halt)");
+            }
         }
         // remember where the bot left the camera, so next tick we can tell if YOU moved it
         if (active && mc.player != null && manualPauseTicks == 0) {
             botYaw = mc.player.getYRot();
             botPitch = mc.player.getXRot();
         }
+    }
+
+    private int errStreak = 0;
+    private int deadTicks = 0;
+    private double aliveX = Double.NaN;
+    private double aliveY;
+    private double aliveZ;
+    private int aliveInv = -1;
+    private int restartCount = 0;
+
+    /** True if it looked frozen and we just auto-restarted (so skip this tick's step). */
+    private boolean frozenSoRestart(Minecraft mc) {
+        var p = mc.player;
+        if (manualPauseTicks > 0) {   // you're driving — don't count that as frozen
+            deadTicks = 0;
+            return false;
+        }
+        int inv = invCount(p);
+        boolean moved = Double.isNaN(aliveX)
+            || Math.hypot(p.getX() - aliveX, p.getZ() - aliveZ) > 0.35
+            || Math.abs(p.getY() - aliveY) > 0.35;
+        boolean produced = inv != aliveInv;   // broke/collected a block = making progress
+        aliveX = p.getX();
+        aliveY = p.getY();
+        aliveZ = p.getZ();
+        aliveInv = inv;
+        if (moved || produced || eating) {
+            deadTicks = 0;
+            return false;
+        }
+        deadTicks++;
+        if (deadTicks >= 70) {        // ~3.5s of doing absolutely nothing → full restart
+            deadTicks = 0;
+            restartCount++;
+            releaseAll(mc);
+            resetRunState();          // clears every transient state, just like a fresh engage
+            axisX = !axisX;           // and try a different heading in case a wall trapped us
+            newLeg(mc);
+            say(mc, "§e⟳ auto-restart — I was stuck, resuming on my own (restart #"
+                + restartCount + ")");
+            return true;
+        }
+        return false;
+    }
+
+    private static int invCount(net.minecraft.client.player.LocalPlayer p) {
+        int n = 0;
+        for (ItemStack s : p.getInventory().getNonEquipmentItems()) {
+            n += s.getCount();
+        }
+        return n;
     }
 
     private int paceCounter = 0;
@@ -372,39 +441,6 @@ public final class Autopilot {
             return;
         }
         paceCounter = 0;
-
-        // ACTIVITY WATCHDOG: whatever branch we're in, if the bot has genuinely not
-        // moved for a while (and isn't mid-eat), assume it's wedged in some state and
-        // force a fresh sweep leg. This runs BEFORE every early-return branch below, so
-        // it catches freezes the position-based anti-stuck (further down) never reaches.
-        // It's the "never just sits there" backstop.
-        if (Double.isNaN(idleX)) {
-            idleX = player.getX();
-            idleZ = player.getZ();
-        }
-        if (eating || Math.hypot(player.getX() - idleX, player.getZ() - idleZ) > 0.5) {
-            idleX = player.getX();
-            idleZ = player.getZ();
-            idleTicks = 0;
-        } else {
-            idleTicks++;
-        }
-        if (idleTicks >= 120) {          // ~6s of no movement at all — kick it back into motion
-            idleTicks = 0;
-            approaching = false;
-            path = null;
-            pathIndex = 0;
-            eating = false;
-            eatingTicks = 0;
-            mining = null;
-            breakingPos = null;
-            stuckTicks = 0;
-            key(mc, mc.options.keyUse, false);
-            key(mc, mc.options.keyAttack, false);
-            newLeg(mc);                  // pick a fresh heading and get moving again
-            say(mc, "§7(watchdog: stalled — resweeping)");
-            return;
-        }
 
         // gentle random-walk drift so the aim looks human, not machine-locked
         driftYaw = Mth.clamp(driftYaw + (rng.nextDouble() - 0.5) * 0.35, -1.5, 1.5);
@@ -436,9 +472,14 @@ public final class Autopilot {
             return;   // fighting takes priority this tick
         }
 
-        // 1c) inventory full — stop so nothing valuable is lost
+        // 1c) inventory full — don't just stop and wait for you. Toss junk (cobble/dirt/
+        //     gravel/etc.) to make room and keep mining. Only stop if it's full of stuff
+        //     actually worth keeping.
         if (player.getInventory().getFreeSlot() < 0) {
-            stop(mc, "§einventory full — empty me (into a shulker), then press O");
+            if (dropJunk(mc)) {
+                return;   // freed a slot this tick — carry on next tick
+            }
+            stop(mc, "§einventory full of keepers — empty me (into a shulker), then press O");
             return;
         }
 
@@ -1050,6 +1091,30 @@ public final class Autopilot {
             }
         }
         return null;
+    }
+
+    /** Bulk stone/dirt/gravel we mine through but don't care to keep. */
+    private static final java.util.Set<String> JUNK = java.util.Set.of(
+        "cobblestone", "cobbled_deepslate", "stone", "deepslate", "dirt", "gravel",
+        "granite", "diorite", "andesite", "tuff", "netherrack", "blackstone", "basalt",
+        "smooth_basalt", "calcite", "dripstone_block", "end_stone", "cobbled_tuff",
+        "diorite_wall", "rooted_dirt");
+
+    /** Toss one junk stack (from anywhere in the inventory) to free a slot. True if it did. */
+    private boolean dropJunk(Minecraft mc) {
+        Inventory inv = mc.player.getInventory();
+        for (int i = 0; i < 36; i++) {                 // 0-8 hotbar, 9-35 main
+            ItemStack s = inv.getItem(i);
+            if (s.isEmpty()
+                || !JUNK.contains(BuiltInRegistries.ITEM.getKey(s.getItem()).getPath())) {
+                continue;
+            }
+            int menuSlot = (i < 9) ? i + 36 : i;       // player menu: hotbar is 36-44, main 9-35
+            mc.gameMode.handleContainerInput(mc.player.inventoryMenu.containerId, menuSlot, 1,
+                net.minecraft.world.inventory.ContainerInput.THROW, mc.player);
+            return true;
+        }
+        return false;
     }
 
     /** Make sure a placeable block is selected in the hotbar. True if one is/was found. */
