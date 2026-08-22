@@ -1977,10 +1977,11 @@ public final class Autopilot {
         key(mc, mc.options.keyUp, dist > 0.8);
     }
 
-    /** True only if there's a REAL solid step up one block ahead (not a plant like cane —
-     *  those have no collision, so we should walk straight through, never hop). */
+    /** True only if there's a REAL full-block step to climb one ahead. Carpet, slabs,
+     *  cane, snow layers etc. are walk-on/through — never hop those (that was the farm's
+     *  jump-spam over carpet-covered water). */
     private boolean solidStep(Minecraft mc, BlockPos ahead) {
-        return mc.level.getBlockState(ahead).blocksMotion()
+        return mc.level.getBlockState(ahead).isCollisionShapeFullBlock(mc.level, ahead)
             && !mc.level.getBlockState(ahead.above()).blocksMotion();
     }
 
