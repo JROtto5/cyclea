@@ -437,6 +437,9 @@ public final class Autopilot {
         farmPath = null;
         farmPathIdx = 0;
         farmRepathCd = 0;
+        farmPathGoal = null;
+        farmStuckTicks = 0;
+        farmStuckX = Double.NaN;
         sellCd = 0;
         sellState = 0;
         sellWaitTicks = 0;
@@ -1786,6 +1789,59 @@ public final class Autopilot {
     private java.util.List<BlockPos> farmPath = null;   // A* route to the target cane
     private int farmPathIdx = 0;
     private int farmRepathCd = 0;
+    private BlockPos farmPathGoal = null;
+    private int farmStuckTicks = 0;
+    private double farmStuckX = Double.NaN;
+    private double farmStuckZ = Double.NaN;
+
+    /** A* route to {@code goal} (farm-aware: carpet/cane/ladders walkable, climbs ±1 steps),
+     *  followed node by node. Re-plans when consumed / the goal moved / on a timer. If it
+     *  can't route (or we stop making progress), it roams to reposition instead of spinning. */
+    private void farmPathTo(Minecraft mc, BlockPos feet, BlockPos goal) {
+        var p = mc.player;
+        // stuck detector: if we're not actually moving, force a re-plan / reposition
+        if (Double.isNaN(farmStuckX)
+            || Math.hypot(p.getX() - farmStuckX, p.getZ() - farmStuckZ) > 0.4) {
+            farmStuckX = p.getX();
+            farmStuckZ = p.getZ();
+            farmStuckTicks = 0;
+        } else {
+            farmStuckTicks++;
+        }
+        boolean stuck = farmStuckTicks > 30;
+
+        if (stuck || farmPath == null || farmPathIdx >= farmPath.size()
+            || farmPathGoal == null || farmPathGoal.distManhattan(goal) > 2
+            || --farmRepathCd <= 0) {
+            farmPath = Pathfinder.findFarm(mc, feet, goal);
+            farmPathGoal = goal;
+            farmPathIdx = 0;
+            farmRepathCd = 30;
+            if (stuck) {
+                farmStuckTicks = 0;
+                if (farmPath == null) {
+                    wanderFarm(mc);   // no route + stuck → reposition, don't grind a wall
+                    return;
+                }
+            }
+        }
+        if (farmPath == null || farmPath.isEmpty()) {
+            wanderFarm(mc);
+            return;
+        }
+        BlockPos node = farmPath.get(Math.min(farmPathIdx, farmPath.size() - 1));
+        double ndx = node.getX() + 0.5 - p.getX();
+        double ndz = node.getZ() + 0.5 - p.getZ();
+        if (ndx * ndx + ndz * ndz < 1.6 && Math.abs(node.getY() - feet.getY()) <= 1) {
+            farmPathIdx++;
+            if (farmPathIdx >= farmPath.size()) {
+                farmPath = null;
+                return;
+            }
+            node = farmPath.get(farmPathIdx);
+        }
+        walkToward(mc, node.getX() + 0.5, node.getZ() + 0.5, node.getY() > feet.getY());
+    }
 
     private BlockPos nearestStairs(Minecraft mc, int r) {
         BlockPos feet = mc.player.blockPosition();
@@ -1888,14 +1944,15 @@ public final class Autopilot {
             Vec3 c = center(cane);
             if (p.getEyePosition().distanceToSqr(c) <= 20.0) {
                 // in reach — MINE it exactly like the miner: aim, then hold attack
+                farmPath = null;
                 key(mc, mc.options.keyUp, false);
                 key(mc, mc.options.keySprint, false);
                 aimAtFast(p, c);
                 key(mc, mc.options.keyAttack, facing(p, c, 30f));   // swing once pointed at it
             } else {
-                // walk to it (toward the cane — never away from it)
+                // route to it (A* around walls / up steps — no straight-line spinning)
                 key(mc, mc.options.keyAttack, false);
-                walkToward(mc, cane.getX() + 0.5, cane.getZ() + 0.5, cane.getY() > feet.getY());
+                farmPathTo(mc, feet, cane);
             }
             return;
         }
@@ -1904,15 +1961,15 @@ public final class Autopilot {
         key(mc, mc.options.keyAttack, false);
         net.minecraft.world.entity.item.ItemEntity drop = nearestCaneDrop(mc, 14);
         if (drop != null) {
-            walkToward(mc, drop.getX(), drop.getZ(), drop.getY() > feet.getY() + 0.5);
+            farmPathTo(mc, feet, drop.blockPosition());
             return;
         }
 
-        // this floor is clear — head toward cane on ANOTHER floor. Walking toward higher
-        // cane climbs the staircase (full blocks OR stair blocks); no stair-detection needed.
-        BlockPos other = nearestHarvestCane(mc, feet, 28, -10, 16);
+        // this floor is clear — head toward cane on ANOTHER floor (up OR down). A* routes to
+        // the base of the staircase at our level, around walls, then climbs/descends it.
+        BlockPos other = nearestHarvestCane(mc, feet, 32, -12, 18);
         if (other != null) {
-            walkToward(mc, other.getX() + 0.5, other.getZ() + 0.5, other.getY() > feet.getY() + 1);
+            farmPathTo(mc, feet, other);
             return;
         }
         // truly no cane anywhere in range — fall back to ladder, else roam
