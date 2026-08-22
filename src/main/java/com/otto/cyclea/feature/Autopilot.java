@@ -1860,82 +1860,46 @@ public final class Autopilot {
             return;
         }
 
-        if (farmActCd > 0) {
-            farmActCd--;
-        }
-
-        // HARVEST like a player: commit to one cane, turn to it smoothly, then break it —
-        // and only once we're actually looking at it (so the break isn't rejected), paced
-        // to ~5/sec so it doesn't flood the server.
-        if (farmTarget != null && !isCaneSegment(mc, farmTarget)) {
-            farmTarget = null;   // already harvested/invalid
-        }
-        if (farmTarget == null && farmActCd <= 0) {
-            farmTarget = nearestHarvestCane(mc, 5, true);
-        }
-        if (farmTarget != null) {
-            farmSeekY = Double.NaN;   // harvesting this floor — reset the stair-seek timer
-            key(mc, mc.options.keyUp, false);
-            key(mc, mc.options.keySprint, false);
-            Vec3 c = center(farmTarget);
-            aimAt(p, c, 9f);          // gentle, smooth camera glide (not a snap)
-            if (farmActCd <= 0 && facing(p, c, 10f)) {
-                mc.gameMode.startDestroyBlock(farmTarget, faceToward(mc, farmTarget));
-                mc.player.swing(InteractionHand.MAIN_HAND);
-                farmActCd = 9;        // ~2/sec — calm, human-paced cutting
-                farmTarget = null;
-            }
-            return;
-        }
-
-        // pick up dropped cane nearby (walk onto the drops to collect them)
-        net.minecraft.world.entity.item.ItemEntity drop = nearestCaneDrop(mc, 8);
-        if (drop != null) {
-            walkToward(mc, drop.getX(), drop.getZ(), false);
-            return;
-        }
-
-        // walk to the nearest ready cane a bit further out (scan throttled for perf)
+        // Find the nearest ready cane anywhere in range (throttled scan; sees a couple
+        // floors up/down so it heads for the staircase toward higher cane on its own).
         if (--farmScanCd <= 0) {
-            farmFar = nearestHarvestCane(mc, 18, false);
-            farmScanCd = 8;
+            farmFar = nearestHarvestCane(mc, 16, false);
+            farmScanCd = 5;
         }
-        if (farmFar != null && isCaneSegment(mc, farmFar)) {
-            walkToward(mc, farmFar.getX() + 0.5, farmFar.getZ() + 0.5,
-                farmFar.getY() > p.blockPosition().getY());
+        BlockPos caneTarget = farmFar;
+        if (caneTarget == null || !isCaneSegment(mc, caneTarget)) {
+            key(mc, mc.options.keyAttack, false);
+            wanderFarm(mc);          // no cane nearby — roam (rides stairs to other floors)
             return;
         }
-        // this level's cane is gone — PATROL to the next floor. Prefer the staircase
-        // (walk it up/down), fall back to ladders. Flip up<->down when height stops
-        // changing (we've hit the top or bottom).
-        BlockPos stairs = nearestStairs(mc, 12);
-        BlockPos lad = nearestLadder(mc, 6, farmGoingUp);
-        if (stairs != null || lad != null) {
-            if (Double.isNaN(farmSeekY)) {
-                farmSeekY = p.getY();
-                farmSeekTicks = 0;
-            }
-            farmSeekTicks++;
-            boolean progressed = farmGoingUp ? p.getY() > farmSeekY + 0.6 : p.getY() < farmSeekY - 0.6;
-            if (progressed) {
-                farmSeekY = p.getY();
-                farmSeekTicks = 0;
-            } else if (farmSeekTicks > 70) {   // ~3.5s no vertical progress → top/bottom
-                farmGoingUp = !farmGoingUp;
-                farmSeekY = p.getY();
-                farmSeekTicks = 0;
-            }
-            if (stairs != null) {
-                walkToward(mc, stairs.getX() + 0.5, stairs.getZ() + 0.5, farmGoingUp);
-            } else {
-                climbLadder(mc, lad, farmGoingUp);
-            }
-            return;
+
+        // WALK toward the cane holding left-click at cane height — mows the whole row and
+        // climbs any steps/stairs on the way. Simple, like a player at an AFK cane farm.
+        double dx = caneTarget.getX() + 0.5 - p.getX();
+        double dz = caneTarget.getZ() + 0.5 - p.getZ();
+        double distXZ = Math.hypot(dx, dz);
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+
+        BlockPos feet = p.blockPosition();
+        Direction d = Direction.fromYRot(yaw);
+        // steer around a real wall (not a 1-step) to keep moving toward the cane
+        if (mc.level.getBlockState(feet.relative(d).above()).blocksMotion() && !solidStep(mc, feet.relative(d))) {
+            boolean leftOpen = !mc.level.getBlockState(
+                feet.relative(d.getCounterClockWise()).above()).blocksMotion();
+            yaw += leftOpen ? -50f : 50f;
+            d = Direction.fromYRot(yaw);
         }
-        // no stairs/ladder in range — wander this floor to find them
-        farmSeekY = Double.NaN;
-        farmSeekTicks = 0;
-        wanderFarm(mc);
+        float pitch = distXZ < 1.6 ? -12f : 0f;   // level to mow the row; tip down on a close stalk
+        aim(p, yaw, pitch);
+        key(mc, mc.options.keySprint, false);
+        key(mc, mc.options.keyUp, true);
+        key(mc, mc.options.keyJump,
+            caneTarget.getY() > feet.getY() && solidStep(mc, feet.relative(d)) && !p.isInWater());
+
+        // swing ONLY when the crosshair is actually on cane — never chew the farm structure
+        boolean onCane = mc.hitResult instanceof BlockHitResult bhr
+            && mc.level.getBlockState(bhr.getBlockPos()).is(Blocks.SUGAR_CANE);
+        key(mc, mc.options.keyAttack, onCane);
     }
 
     private static int countItem(net.minecraft.client.player.LocalPlayer p, String path) {
@@ -1958,7 +1922,7 @@ public final class Autopilot {
         double bestD = Double.MAX_VALUE;
         BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
         for (int dx = -r; dx <= r; dx++) {
-            for (int dy = -3; dy <= 4; dy++) {
+            for (int dy = -8; dy <= 10; dy++) {   // sees a couple floors up/down → heads for stairs
                 for (int dz = -r; dz <= r; dz++) {
                     m.set(feet.getX() + dx, feet.getY() + dy, feet.getZ() + dz);
                     if (!mc.level.getBlockState(m).is(Blocks.SUGAR_CANE)
