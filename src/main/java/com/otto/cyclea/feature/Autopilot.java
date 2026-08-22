@@ -80,6 +80,7 @@ public final class Autopilot {
     private int idleTicks = 0;
     private BlockPos pillarSpot = null;       // spot to fill mid-jump when climbing out of Y-60
     private int climbTicks = 0;               // how long we've been climbing out of a dip
+    private Direction climbDir = null;        // fixed stair-up direction while climbing
     private int pillarTicks = 0;              // how long the current pillar-up has been running
     private int jumpTicks = 0;
     private double blocksTraveled = 0;    // session stats
@@ -345,6 +346,7 @@ public final class Autopilot {
         idleTicks = 0;
         pillarSpot = null;
         climbTicks = 0;
+        climbDir = null;
         pillarTicks = 0;
         vaultState = 0;
         deadTicks = 0;
@@ -676,47 +678,65 @@ public final class Autopilot {
             key(mc, mc.options.keyUp, false);
             key(mc, mc.options.keySprint, false);
 
-            // (a) FIND OPEN AIR: look for the nearest reachable standing spot at/above the
-            //     target level and dig/walk a staircase to it (your idea — line it up).
-            Direction esc = findEscapeDir(mc, feetC);
-            if (esc != null) {
-                BlockPos ah = feetC.relative(esc);
-                if (canMine(mc, ah.above())) {
-                    swingAt(mc, ah.above());
-                    return;
-                }
-                if (canMine(mc, ah)) {
-                    swingAt(mc, ah);
-                    return;
-                }
-                if (passable(mc, ah) && passable(mc, ah.above())) {
-                    aim(player, esc.toYRot(), -4f);
-                    key(mc, mc.options.keyUp, true);
-                    key(mc, mc.options.keySprint, true);
-                    key(mc, mc.options.keyJump, true);
-                    return;
-                }
-                // else blocked by bedrock/unbreakable — fall through to the pillar
+            // JUST STAIR UP. One fixed direction, one dumb reliable loop:
+            // clear our own headroom → make sure there's a tread block ahead →
+            // clear the two blocks above it → sprint-jump onto it → repeat.
+            if (climbDir == null) {
+                climbDir = axisX
+                    ? (targetX - player.getX() >= 0 ? Direction.EAST : Direction.WEST)
+                    : (targetZ - player.getZ() >= 0 ? Direction.SOUTH : Direction.NORTH);
             }
 
-            // (b) clear any ceiling that blocks rising in place
+            // headroom above our own head (needed to jump)
             BlockPos head2 = feetC.above(2);
             if (canMine(mc, head2)) {
                 swingAt(mc, head2);
                 return;
             }
 
-            // (c) PILLAR — the guaranteed escape. Jump now; the (0) latch above fills the
-            //     cell mid-air next ticks and lands us a level higher. Needs one block
-            //     (we always keep a building stock).
-            if (player.onGround() && ensureHotbarBlock(mc)) {
+            BlockPos tread = feetC.relative(climbDir);   // the stair step we'll stand on
+            BlockPos c1 = tread.above();
+            BlockPos c2 = tread.above(2);
+
+            if (hazard(mc, tread) || hazard(mc, c1)) {
+                climbDir = climbDir.getClockWise();      // lava/water that way — turn the stair
+                return;
+            }
+            if (passable(mc, tread)) {
+                // no step to stand on — build one from the cobble stock
+                if (place(mc, tread, "")) {
+                    return;
+                }
+                climbDir = climbDir.getClockWise();      // can't build here — turn
+                return;
+            }
+            if (canMine(mc, c1)) {
+                swingAt(mc, c1);                          // open the stair (feet space)
+                return;
+            }
+            if (canMine(mc, c2)) {
+                swingAt(mc, c2);                          // open the stair (head space)
+                return;
+            }
+            if (passable(mc, c1) && passable(mc, c2)) {
+                // stair is ready — mount it
+                aim(player, climbDir.toYRot(), -5f);
+                key(mc, mc.options.keyUp, true);
+                key(mc, mc.options.keySprint, true);
+                key(mc, mc.options.keyJump, true);
+                return;
+            }
+            // stair blocked by unbreakable — turn; if we've spun a while, pillar out instead
+            climbDir = climbDir.getClockWise();
+            if (climbTicks > 80 && player.onGround() && ensureHotbarBlock(mc)) {
                 pillarSpot = feetC;
                 pillarTicks = 0;
+                key(mc, mc.options.keyJump, true);
             }
-            key(mc, mc.options.keyJump, true);
             return;
         }
         climbTicks = 0;
+        climbDir = null;
         pillarSpot = null;   // at/above target depth — no pillar pending
 
         // 1c) inventory full — never just stop. First cash out with the server sell
