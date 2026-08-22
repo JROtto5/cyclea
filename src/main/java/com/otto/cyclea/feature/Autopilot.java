@@ -92,6 +92,10 @@ public final class Autopilot {
         return oresMined;
     }
 
+    public int getRestarts() {
+        return restartCount;
+    }
+
     /** Ores per hour this session (0 until we've mined something). */
     public int getOresPerHour() {
         long s = getSessionSeconds();
@@ -344,7 +348,8 @@ public final class Autopilot {
             + " §8(handoff #" + takeovers + ")");
         if (oresMined > 0 || blocksTraveled > 5) {
             say(mc, "§8   run so far: §7" + getBlocksTraveled() + "m, §b" + oresMined
-                + " ores §7(" + getOresPerHour() + "/hr), §7" + (getSessionSeconds() / 60) + "m active");
+                + " ores §7(" + getOresPerHour() + "/hr), §7" + (getSessionSeconds() / 60) + "m active"
+                + (restartCount > 0 ? " §8· self-recovered ×" + restartCount : ""));
         }
     }
 

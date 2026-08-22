@@ -61,7 +61,8 @@ public class CycleaHud implements HudElement {
             g.text(font, "§6AUTO ▶ " + ap.getBlocksTraveled() + "m  " + (sec / 60) + "m"
                 + (sec % 60) + "s   §7takeovers " + ap.getTakeovers(), x, y + 72, 0xFFFFC060, true);
             g.text(font, "§b⛏ " + ap.getOresMined() + " ores  §7(" + ap.getOresPerHour()
-                + "/hr)", x, y + 84, 0xFF80D0FF, true);
+                + "/hr)" + (ap.getRestarts() > 0 ? "  §8self-fixed ×" + ap.getRestarts() : ""),
+                x, y + 84, 0xFF80D0FF, true);
         } else if (ap.getTakeovers() > 0) {
             // assist metrics: how much you've had to step in
             g.text(font, "§7You: " + ap.getTakeovers() + " takeovers, "
