@@ -406,9 +406,16 @@ public final class Autopilot {
         if (!approaching && ++scanTick >= 40) {
             scanTick = 0;
             TargetScanner.Scan scan = TargetScanner.scan(mc);
-            if (!scan.bases().isEmpty()) {
-                TargetScanner.Base best = richest(scan.bases());
-                MinimapBridge.pushBases(scan.bases());
+            // still pin every base to the map, but only NAVIGATE to worthwhile ones
+            MinimapBridge.pushBases(scan.bases());
+            java.util.List<TargetScanner.Base> worthGoing = new java.util.ArrayList<>();
+            for (TargetScanner.Base b : scan.bases()) {
+                if (!CycleaConfig.get().skipRaided || !b.status().equals("RAIDED")) {
+                    worthGoing.add(b);
+                }
+            }
+            if (!worthGoing.isEmpty()) {
+                TargetScanner.Base best = richest(worthGoing);
                 // A* a real route to the base; fall back to dig-toward if none found
                 path = Pathfinder.find(mc, mc.player.blockPosition(), best.center());
                 pathIndex = 0;

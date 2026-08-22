@@ -35,6 +35,17 @@ public final class CycleaConfig {
     public boolean oneByOne = false;
     // 0 = fast (every tick), 1 = normal (every 2), 2 = slow (every 3) — pace vs the server
     public int paceLevel = 1;
+    // skip raided/ruined bases — only go for ones with loot still in them
+    public boolean skipRaided = true;
+
+    public void cycleSkipRaided() {
+        skipRaided = !skipRaided;
+        save();
+    }
+
+    public String skipRaidedLabel() {
+        return skipRaided ? "On (only looted-worthy)" : "Off (visit all)";
+    }
 
     /** Act every N ticks. Default is full speed (every tick); only "Slow" eases off. */
     public int actEveryNTicks() {
@@ -188,6 +199,7 @@ public final class CycleaConfig {
                 oreSeekLevel = Integer.parseInt(p.getProperty("oreSeekLevel", "1"));
                 oneByOne = Boolean.parseBoolean(p.getProperty("oneByOne", "false"));
                 paceLevel = Integer.parseInt(p.getProperty("paceLevel", "1"));
+                skipRaided = Boolean.parseBoolean(p.getProperty("skipRaided", "true"));
             }
         } catch (Exception ignored) {
             // defaults are fine
@@ -203,6 +215,7 @@ public final class CycleaConfig {
         p.setProperty("oreSeekLevel", Integer.toString(oreSeekLevel));
         p.setProperty("oneByOne", Boolean.toString(oneByOne));
         p.setProperty("paceLevel", Integer.toString(paceLevel));
+        p.setProperty("skipRaided", Boolean.toString(skipRaided));
         try (OutputStream out = Files.newOutputStream(file())) {
             p.store(out, "Cyclea config");
         } catch (IOException ignored) {

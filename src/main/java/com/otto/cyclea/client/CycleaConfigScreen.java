@@ -59,6 +59,12 @@ public class CycleaConfigScreen extends Screen {
             c.cyclePace();
             b.setMessage(paceMsg());
         }).bounds(x, y, w, h).build());
+        y += 26;
+
+        addRenderableWidget(Button.builder(skipRaidedMsg(), b -> {
+            c.cycleSkipRaided();
+            b.setMessage(skipRaidedMsg());
+        }).bounds(x, y, w, h).build());
         y += 40;
 
         addRenderableWidget(Button.builder(Component.literal("Done"), b -> this.onClose())
@@ -87,6 +93,10 @@ public class CycleaConfigScreen extends Screen {
 
     private Component paceMsg() {
         return Component.literal("Speed / server pace: " + CycleaConfig.get().paceLabel());
+    }
+
+    private Component skipRaidedMsg() {
+        return Component.literal("Skip raided bases: " + CycleaConfig.get().skipRaidedLabel());
     }
 
     @Override
