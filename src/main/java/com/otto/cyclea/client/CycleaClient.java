@@ -8,6 +8,9 @@ import com.otto.cyclea.feature.TargetScanner;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.loader.api.FabricLoader;
@@ -87,6 +90,29 @@ public class CycleaClient implements ClientModInitializer {
                 CycleaHud.renderBaseLog(gx, m, st);
                 CycleaHud.renderBigAlert(gx, m, st);
             }));
+
+        // /cyc goto <x> <z> | /cyc spawn | /cyc stop
+        ClientCommandRegistrationCallback.EVENT.register((dispatcher, reg) ->
+            dispatcher.register(ClientCommands.literal("cyc")
+                .then(ClientCommands.literal("goto")
+                    .then(ClientCommands.argument("x", IntegerArgumentType.integer())
+                        .then(ClientCommands.argument("z", IntegerArgumentType.integer())
+                            .executes(ctx -> {
+                                Autopilot.get().gotoCoord(Minecraft.getInstance(),
+                                    IntegerArgumentType.getInteger(ctx, "x"),
+                                    IntegerArgumentType.getInteger(ctx, "z"));
+                                return 1;
+                            }))))
+                .then(ClientCommands.literal("spawn")
+                    .executes(ctx -> {
+                        Autopilot.get().gotoSpawn(Minecraft.getInstance());
+                        return 1;
+                    }))
+                .then(ClientCommands.literal("stop")
+                    .executes(ctx -> {
+                        Autopilot.get().stop(Minecraft.getInstance(), "§7stopped by /cyc stop");
+                        return 1;
+                    }))));
 
         loadPriorFinds();
     }

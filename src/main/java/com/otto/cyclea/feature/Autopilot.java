@@ -186,6 +186,10 @@ public final class Autopilot {
     }
 
     /** Point the bot at its first goal for the current mode. */
+    private boolean hasGoto = false;
+    private int gotoX = 0;
+    private int gotoZ = 0;
+
     private void retarget(Minecraft mc) {
         if (mc.player == null) {
             return;
@@ -193,10 +197,38 @@ public final class Autopilot {
         if (searchMode == SearchMode.SWEEP) {
             newSpiral(mc);
         } else {
-            targetX = 0;
-            targetZ = 0;
+            targetX = hasGoto ? gotoX : 0;   // custom /cyc goto target, else spawn
+            targetZ = hasGoto ? gotoZ : 0;
             newLeg(mc);
         }
+    }
+
+    /** Set a custom destination and mine toward it (engages if needed). */
+    public void gotoCoord(Minecraft mc, int x, int z) {
+        hasGoto = true;
+        gotoX = x;
+        gotoZ = z;
+        searchMode = SearchMode.SPAWN;
+        if (!active) {
+            active = true;
+            resetRunState();
+            CycleaState.get().setActive(true);
+            targetY = depthForDimension(mc);
+        }
+        targetX = x;
+        targetZ = z;
+        newLeg(mc);
+        say(mc, "§6[Autopilot] §aGOTO §f" + x + ", " + z + " §7— mining my way there");
+    }
+
+    /** Clear a custom destination and head back to spawn. */
+    public void gotoSpawn(Minecraft mc) {
+        hasGoto = false;
+        searchMode = SearchMode.SPAWN;
+        if (active) {
+            retarget(mc);
+        }
+        say(mc, "§6[Autopilot] §7target → spawn (0,0)");
     }
 
     private void newSpiral(Minecraft mc) {
