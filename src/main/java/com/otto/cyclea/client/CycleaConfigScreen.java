@@ -61,9 +61,21 @@ public class CycleaConfigScreen extends Screen {
         }).bounds(x, y, w, h).build());
         y += 26;
 
+        addRenderableWidget(Button.builder(skipBasesMsg(), b -> {
+            c.cycleSkipBases();
+            b.setMessage(skipBasesMsg());
+        }).bounds(x, y, w, h).build());
+        y += 26;
+
         addRenderableWidget(Button.builder(skipRaidedMsg(), b -> {
             c.cycleSkipRaided();
             b.setMessage(skipRaidedMsg());
+        }).bounds(x, y, w, h).build());
+        y += 26;
+
+        addRenderableWidget(Button.builder(Component.literal("Clear base waypoints"), b -> {
+            int n = com.otto.cyclea.feature.MinimapBridge.clearBaseWaypoints();
+            b.setMessage(Component.literal("Cleared " + n + " base waypoint" + (n == 1 ? "" : "s")));
         }).bounds(x, y, w, h).build());
         y += 40;
 
@@ -93,6 +105,10 @@ public class CycleaConfigScreen extends Screen {
 
     private Component paceMsg() {
         return Component.literal("Speed / server pace: " + CycleaConfig.get().paceLabel());
+    }
+
+    private Component skipBasesMsg() {
+        return Component.literal("Skip all bases: " + CycleaConfig.get().skipBasesLabel());
     }
 
     private Component skipRaidedMsg() {

@@ -71,6 +71,28 @@ public final class MinimapBridge {
         };
     }
 
+    /** Remove every base waypoint Cyclea placed (names starting with "Base "). Returns how many were removed. */
+    public static int clearBaseWaypoints() {
+        try {
+            WaypointSet set = currentSet();
+            if (set == null) {
+                return 0;
+            }
+            java.util.List<Waypoint> toRemove = new java.util.ArrayList<>();
+            for (Waypoint w : set.getWaypoints()) {
+                if (w.getName() != null && w.getName().startsWith("Base ")) {
+                    toRemove.add(w);
+                }
+            }
+            for (Waypoint w : toRemove) {
+                set.remove(w);
+            }
+            return toRemove.size();
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
     /** Drop a death-point waypoint where the player died. Returns true if placed. */
     public static boolean pushDeath(BlockPos p) {
         try {

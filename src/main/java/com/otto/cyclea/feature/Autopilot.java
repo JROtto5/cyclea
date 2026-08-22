@@ -406,13 +406,19 @@ public final class Autopilot {
         if (!approaching && ++scanTick >= 40) {
             scanTick = 0;
             TargetScanner.Scan scan = TargetScanner.scan(mc);
-            // still pin every base to the map, but only NAVIGATE to worthwhile ones
-            MinimapBridge.pushBases(scan.bases());
+            // always pin every base to the map so you can find them yourself
+            int pinned = MinimapBridge.pushBases(scan.bases());
             java.util.List<TargetScanner.Base> worthGoing = new java.util.ArrayList<>();
-            for (TargetScanner.Base b : scan.bases()) {
-                if (!CycleaConfig.get().skipRaided || !b.status().equals("RAIDED")) {
-                    worthGoing.add(b);
+            // "Skip all bases" (default on): don't auto-navigate — just pin and keep sweeping
+            if (!CycleaConfig.get().skipBases) {
+                for (TargetScanner.Base b : scan.bases()) {
+                    if (!CycleaConfig.get().skipRaided || !b.status().equals("RAIDED")) {
+                        worthGoing.add(b);
+                    }
                 }
+            } else if (pinned > 0) {
+                say(mc, "§b⚑ " + pinned + " base" + (pinned == 1 ? "" : "s")
+                    + " pinned to map §7(skip-all-bases on — I'll keep mining, you go check them)");
             }
             if (!worthGoing.isEmpty()) {
                 TargetScanner.Base best = richest(worthGoing);
@@ -499,6 +505,24 @@ public final class Autopilot {
             jumpTicks--;
         } else {
             key(mc, mc.options.keyJump, false);
+        }
+
+        // climb back to Y-59 if we sank below it (the Y-60 bedrock trap): pillar UP —
+        // clear the ceiling if needed, then jump and drop a block under us mid-air.
+        BlockPos fp = player.blockPosition();
+        if (fp.getY() < targetY) {
+            key(mc, mc.options.keyUp, false);
+            key(mc, mc.options.keySprint, false);
+            BlockPos head2 = fp.above(2);
+            if (canMine(mc, head2)) {
+                swingAt(mc, head2);          // open the ceiling so we can rise
+                return;
+            }
+            if (!player.onGround()) {
+                place(mc, fp.below(), "");   // mid-jump: place a block beneath → land a level up
+            }
+            key(mc, mc.options.keyJump, true);
+            return;
         }
 
         // 5) travel direction toward the target
