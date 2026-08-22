@@ -232,6 +232,8 @@ public final class Autopilot {
             startZ = mc.player.getZ();
         }
         mining = null;
+        lockedDir = null;   // new leg = fresh heading decision
+        lockTicks = 0;
     }
 
     /** Working depth for the current dimension: overworld dives to the diamond band,
@@ -349,6 +351,8 @@ public final class Autopilot {
         climbTicks = 0;
         climbDir = null;
         pillarTicks = 0;
+        lockedDir = null;
+        lockTicks = 0;
         vaultState = 0;
         deadTicks = 0;
         aliveX = Double.NaN;
@@ -1244,8 +1248,21 @@ public final class Autopilot {
      * commits to a detour for a while so it clears the pocket instead of hugging
      * the edge. Null only if boxed in on every side.
      */
+    private Direction lockedDir = null;   // committed heading — kills open-path flip-flop
+    private int lockTicks = 0;
+
     private Direction chooseSafeDir(Minecraft mc, BlockPos feet,
                                     Direction primary, Direction secondary) {
+        // COMMIT: once a heading is chosen, hold it (~1s) as long as it stays safe.
+        // Re-deciding every tick made it dither back-and-forth at junctions with
+        // several open paths — decide once, walk it, re-evaluate after.
+        if (lockedDir != null && lockTicks > 0) {
+            if (firstSafe(mc, feet, null, new Direction[]{lockedDir}, 1) != null) {
+                lockTicks--;
+                return lockedDir;
+            }
+            lockTicks = 0;   // locked way went bad — re-decide now
+        }
         // toward-target first, then sidestep — NO full-retreat (primary.getOpposite),
         // which caused it to drift backwards through cleared tunnel. Dead-ends are
         // handled by the tower-up / redirect recovery instead.
@@ -1267,6 +1284,8 @@ public final class Autopilot {
         } else if (detourTicks > 0) {
             detourTicks--;
         }
+        lockedDir = pick;
+        lockTicks = 20;         // ~1s of commitment before the next re-decision
         return pick;
     }
 
