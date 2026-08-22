@@ -92,6 +92,14 @@ public class CycleaHud implements HudElement {
             py = Math.max(cy - r, Math.min(cy + r - 2, py));
             g.fill(px, py, px + 2, py + 2, color);
         }
+        // ore X-ray: selected ores nearby, color-coded (shown through walls)
+        for (int[] o : s.getOreBlips()) {
+            int px = cx + (int) Math.round(o[0] * scale);
+            int py = cy + (int) Math.round(o[1] * scale);
+            px = Math.max(cx - r, Math.min(cx + r - 1, px));
+            py = Math.max(cy - r, Math.min(cy + r - 1, py));
+            g.fill(px, py, px + 1, py + 1, 0xFF000000 | o[2]);
+        }
         g.fill(cx - 1, cy - 1, cx + 2, cy + 2, 0xFFFFFFFF); // player
     }
 

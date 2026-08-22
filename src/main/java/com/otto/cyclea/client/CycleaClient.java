@@ -43,6 +43,7 @@ public class CycleaClient implements ClientModInitializer {
     private KeyMapping modeKey;
     private KeyMapping configKey;
     private int tickCounter = 0;
+    private int oreScanCounter = 0;
     private boolean wasAlive = true;
     private List<TargetScanner.Base> lastBases = List.of();
 
@@ -165,6 +166,16 @@ public class CycleaClient implements ClientModInitializer {
 
         // drive the bot every tick (it self-guards and no-ops when off)
         Autopilot.get().tick(mc);
+
+        // ore X-ray: whenever search/auto is on, plot selected ores on the radar (through walls)
+        if ((st.isActive() || Autopilot.get().isActive()) && mc.level != null) {
+            if (++oreScanCounter >= 20) {
+                oreScanCounter = 0;
+                st.setOreBlips(TargetScanner.scanOres(mc, 20));
+            }
+        } else {
+            st.setOreBlips(java.util.List.of());
+        }
 
         if (!st.isActive() || mc.level == null) {
             return;

@@ -194,6 +194,17 @@ public final class CycleaState {
         return blips;
     }
 
+    // ore X-ray blips: {dx, dz, rgb} relative to the player, for the radar
+    private volatile List<int[]> oreBlips = List.of();
+
+    public List<int[]> getOreBlips() {
+        return oreBlips;
+    }
+
+    public void setOreBlips(List<int[]> b) {
+        this.oreBlips = b;
+    }
+
     public void setSnapshot(int chests, int shulkers, int bases, int beacons,
                             int players, int hostiles, int richest, int nearestLoot,
                             int nearestDistance, String nearest, String vert,

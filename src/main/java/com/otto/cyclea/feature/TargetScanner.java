@@ -1,7 +1,9 @@
 package com.otto.cyclea.feature;
 
+import com.otto.cyclea.CycleaConfig;
 import com.otto.cyclea.CycleaState;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -84,6 +86,71 @@ public final class TargetScanner {
             || be instanceof BellBlockEntity || be instanceof CampfireBlockEntity
             || be instanceof BeehiveBlockEntity || be instanceof EnchantingTableBlockEntity
             || be instanceof CrafterBlockEntity;
+    }
+
+    /** X-ray scan: every ore we're configured to seek, within {@code radius}, even
+     *  through walls. Returns {dx, dz, rgb} relative to the player for the radar.
+     *  Capped so it never lags. */
+    public static List<int[]> scanOres(Minecraft mc, int radius) {
+        List<int[]> out = new ArrayList<>();
+        ClientLevel level = mc.level;
+        if (level == null || mc.player == null || CycleaConfig.get().oreSeekLevel == 0) {
+            return out;
+        }
+        CycleaConfig cfg = CycleaConfig.get();
+        BlockPos p = mc.player.blockPosition();
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
+        for (int dy = -radius; dy <= radius; dy++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    m.set(p.getX() + dx, p.getY() + dy, p.getZ() + dz);
+                    BlockState st = level.getBlockState(m);
+                    if (st.isAir()) {
+                        continue;
+                    }
+                    String path = BuiltInRegistries.BLOCK.getKey(st.getBlock()).getPath();
+                    if (!cfg.wantsOre(path)) {
+                        continue;
+                    }
+                    out.add(new int[]{dx, dz, oreColor(path)});
+                    if (out.size() >= 250) {
+                        return out;
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    private static int oreColor(String path) {
+        if (path.contains("diamond")) {
+            return 0x33E5FF;
+        }
+        if (path.contains("emerald")) {
+            return 0x2BE04A;
+        }
+        if (path.contains("redstone")) {
+            return 0xFF3030;
+        }
+        if (path.contains("gold") || path.equals("ancient_debris")) {
+            return 0xFFC020;
+        }
+        if (path.contains("lapis")) {
+            return 0x2A5BFF;
+        }
+        if (path.contains("copper")) {
+            return 0xE08040;
+        }
+        if (path.contains("iron")) {
+            return 0xE8D0B0;
+        }
+        if (path.contains("coal")) {
+            return 0x606060;
+        }
+        if (path.contains("quartz")) {
+            return 0xF0E8E0;
+        }
+        return 0xC0FFC0;
     }
 
     public static Scan scan(Minecraft mc) {
