@@ -723,7 +723,11 @@ public final class Autopilot {
                 newLeg(mc);
                 return;
             }
-            stop(mc, "reached spawn area");
+            // reached spawn — don't stop and wait for you; roll straight into an
+            // area-sweep so it keeps working (it should never just quit on you).
+            searchMode = SearchMode.SWEEP;
+            newSpiral(mc);
+            say(mc, "§a✔ reached spawn — now sweeping the area for bases/ores");
             return;
         }
         // ore-seek: detour to dig out configured ores, but NEVER get stuck on one —
@@ -800,7 +804,27 @@ public final class Autopilot {
                 jumpTicks = 4;   // hop up into the space as it clears
                 return;
             }
-            stop(mc, "§cfully boxed in (lava/water/bedrock) — need you");
+            // can't go up either (bedrock/hazard above). DON'T stop — mine any safe
+            // neighbour (even backward) to break out, then re-anchor a new heading.
+            for (Direction d : Direction.Plane.HORIZONTAL) {
+                if (canMine(mc, feet.relative(d))) {
+                    mining = feet.relative(d);
+                    swingAt(mc, mining);
+                    return;
+                }
+                if (canMine(mc, feet.above().relative(d))) {
+                    mining = feet.above().relative(d);
+                    swingAt(mc, mining);
+                    return;
+                }
+            }
+            // truly sealed by unbreakables — re-anchor and head a different way (never quit)
+            startX = player.getX();
+            startZ = player.getZ();
+            axisX = !axisX;
+            detourDir = null;
+            detourTicks = 0;
+            jumpTicks = 4;
             return;
         }
         if (dir != primary) {
@@ -944,13 +968,18 @@ public final class Autopilot {
                 aim(player, travelYaw + glanceYaw, glancePitch);
             }
             if (passable(mc, aheadFeet.below()) && passable(mc, aheadFeet.below().below())) {
-                // gap ahead — bridge it with a block if we have one, else stop
+                // gap/drop ahead — bridge it if we can...
                 key(mc, mc.options.keyUp, false);
                 key(mc, mc.options.keySprint, false);
                 if (place(mc, aheadFeet.below(), "")) {
                     return;   // placed a bridge block
                 }
-                stop(mc, "§edrop ahead, no blocks to bridge — need you");
+                // ...no blocks: DON'T stop — turn away and head a different direction.
+                startX = player.getX();
+                startZ = player.getZ();
+                axisX = !axisX;
+                detourDir = null;
+                detourTicks = 0;
                 return;
             }
             // auto-torch: drop a torch every ~12 blocks so worked tunnels stay lit and
@@ -1206,7 +1235,9 @@ public final class Autopilot {
         "cobblestone", "cobbled_deepslate", "stone", "deepslate", "dirt", "gravel",
         "granite", "diorite", "andesite", "tuff", "netherrack", "blackstone", "basalt",
         "smooth_basalt", "calcite", "dripstone_block", "end_stone", "cobbled_tuff",
-        "diorite_wall", "rooted_dirt");
+        "rooted_dirt", "sand", "red_sand", "sandstone", "red_sandstone", "flint",
+        "clay", "coarse_dirt", "mud", "magma_block", "soul_sand", "soul_soil",
+        "grass_block", "mossy_cobblestone", "infested_stone", "infested_deepslate");
 
     /** Toss one junk stack (from anywhere in the inventory) to free a slot. True if it did. */
     private boolean dropJunk(Minecraft mc) {
@@ -1614,10 +1645,18 @@ public final class Autopilot {
         }
         int slot = findHotbar(inv, s -> isPickaxe(s) && !nearlyBroken(s));
         if (slot < 0) {
+            // no healthy pick — rather than stop, keep using a worn one until it shatters
+            slot = findHotbar(inv, this::isPickaxeStack);
+        }
+        if (slot < 0) {
             return false;
         }
         inv.setSelectedSlot(slot);
         return true;
+    }
+
+    private boolean isPickaxeStack(ItemStack s) {
+        return isPickaxe(s);
     }
 
     private static int findHotbar(Inventory inv, java.util.function.Predicate<ItemStack> p) {
