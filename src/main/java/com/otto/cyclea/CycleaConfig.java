@@ -161,6 +161,20 @@ public final class CycleaConfig {
         return runWithMenus ? "On (runs with menu open)" : "Off";
     }
 
+    // Emergency escape: run a home/teleport command when about to die, hit hard, or a
+    // player gets close. Loud alarm + banner. Default ON — it's a safety net.
+    public boolean escapeHome = true;
+    public String homeCommand = "home 2";   // sent WITHOUT the slash
+
+    public void cycleEscapeHome() {
+        escapeHome = !escapeHome;
+        save();
+    }
+
+    public String escapeHomeLabel() {
+        return escapeHome ? "On (/" + homeCommand + ")" : "Off";
+    }
+
     // Watchman: warn when another player comes within range while you're underground
     public boolean watchman = true;
 
@@ -375,6 +389,8 @@ public final class CycleaConfig {
                 oneByOne = Boolean.parseBoolean(p.getProperty("oneByOne", "false"));
                 paceLevel = Integer.parseInt(p.getProperty("paceLevel", "1"));
                 toolGuard = Integer.parseInt(p.getProperty("toolGuard", "1"));
+                escapeHome = Boolean.parseBoolean(p.getProperty("escapeHome", "true"));
+                homeCommand = p.getProperty("homeCommand", "home 2");
                 runWithMenus = Boolean.parseBoolean(p.getProperty("runWithMenus", "true"));
                 watchman = Boolean.parseBoolean(p.getProperty("watchman", "true"));
                 oreEsp = Boolean.parseBoolean(p.getProperty("oreEsp", "true"));
@@ -404,6 +420,8 @@ public final class CycleaConfig {
         p.setProperty("oneByOne", Boolean.toString(oneByOne));
         p.setProperty("paceLevel", Integer.toString(paceLevel));
         p.setProperty("toolGuard", Integer.toString(toolGuard));
+        p.setProperty("escapeHome", Boolean.toString(escapeHome));
+        p.setProperty("homeCommand", homeCommand);
         p.setProperty("runWithMenus", Boolean.toString(runWithMenus));
         p.setProperty("watchman", Boolean.toString(watchman));
         p.setProperty("oreEsp", Boolean.toString(oreEsp));

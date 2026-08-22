@@ -116,6 +116,45 @@ public class CycleaClient implements ClientModInitializer {
         }
     }
 
+    private float prevHp = Float.NaN;
+    private int homeCd = 0;
+
+    /** Emergency /home when about to die or hit hard. Fires regardless of the bot. */
+    private void safety(Minecraft mc) {
+        if (homeCd > 0) {
+            homeCd--;
+        }
+        if (mc.player == null) {
+            prevHp = Float.NaN;
+            return;
+        }
+        float hp = mc.player.getHealth();
+        if (CycleaConfig.get().escapeHome && homeCd == 0 && mc.player.isAlive()) {
+            if (hp <= 8f) {
+                fireHome(mc, "low HP " + (int) hp);
+            } else if (!Float.isNaN(prevHp) && prevHp - hp >= 5f) {
+                fireHome(mc, "big hit −" + (int) (prevHp - hp));
+            }
+        }
+        prevHp = hp;
+    }
+
+    /** Run the escape command with a loud alarm + banner, and stand the bot down. */
+    private void fireHome(Minecraft mc, String reason) {
+        homeCd = 200;   // ~10s guard so it fires once, not every tick
+        String cmd = CycleaConfig.get().homeCommand.replaceFirst("^/", "");
+        mc.player.connection.sendCommand(cmd);
+        CycleaState.get().flashAlert("!! ESCAPING — /" + CycleaConfig.get().homeCommand + " !!",
+            0xFFFF2020, 6000);
+        for (float pitch : new float[]{0.4f, 0.7f, 1.1f}) {
+            mc.player.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, pitch);   // alarm chord
+        }
+        say(mc, "§4§l⚠ EMERGENCY (" + reason + ") — running §f/" + CycleaConfig.get().homeCommand);
+        if (Autopilot.get().isActive()) {
+            Autopilot.get().stop(mc, "§cemergency /home — " + reason);
+        }
+    }
+
     /** Warn (chat + sound) when another player is within range — underground early warning. */
     private void watchman(Minecraft mc) {
         if (watchAlertCd > 0) {
@@ -140,6 +179,11 @@ public class CycleaClient implements ClientModInitializer {
                 best = d;
                 nearest = pl;
             }
+        }
+        // player got close — bail out via /home if escape is on
+        if (nearest != null && best <= 48 && CycleaConfig.get().escapeHome && homeCd == 0) {
+            fireHome(mc, nearest.getName().getString() + " " + (int) best + "m");
+            return;
         }
         if (nearest != null && watchAlertCd == 0) {
             BlockPos me = mc.player.blockPosition();
@@ -244,7 +288,8 @@ public class CycleaClient implements ClientModInitializer {
             say(mc, "§7Base log cleared (" + n + ")");
         }
 
-        // Watchman: warn if another player comes near while you're down here
+        // Emergency escape (about to die / big hit) + Watchman (player near, may also escape)
+        safety(mc);
         watchman(mc);
 
         // drive the bot every tick (it self-guards and no-ops when off)
