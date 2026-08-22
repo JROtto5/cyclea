@@ -77,6 +77,7 @@ public final class Autopilot {
     private double idleX = Double.NaN;        // activity watchdog (catches any freeze)
     private double idleZ = Double.NaN;
     private int idleTicks = 0;
+    private BlockPos pillarSpot = null;       // spot to fill mid-jump when climbing out of Y-60
     private int jumpTicks = 0;
     private double blocksTraveled = 0;    // session stats
     private long sessionStart = 0;
@@ -264,6 +265,7 @@ public final class Autopilot {
         idleX = Double.NaN;
         idleZ = Double.NaN;
         idleTicks = 0;
+        pillarSpot = null;
         jumpTicks = 0;
         botYaw = Float.NaN;
         manualPauseTicks = 0;
@@ -546,22 +548,47 @@ public final class Autopilot {
             key(mc, mc.options.keyJump, false);
         }
 
-        // climb back to Y-59 if we sank below it (the Y-60 bedrock trap): pillar UP —
-        // clear the ceiling if needed, then jump and drop a block under us mid-air.
-        BlockPos fp = player.blockPosition();
-        if (fp.getY() < targetY) {
+        // climb back to Y-59 if we sank below it (the Y-60 bedrock trap). This is the
+        // #1 cause of it wedging and needing a manual off/on, so it's aggressive and
+        // has three fallbacks — it MUST get back up.
+        if (player.onGround() && player.blockPosition().getY() < targetY) {
             key(mc, mc.options.keyUp, false);
             key(mc, mc.options.keySprint, false);
-            BlockPos head2 = fp.above(2);
-            if (canMine(mc, head2)) {
-                swingAt(mc, head2);          // open the ceiling so we can rise
+            BlockPos feetNow = player.blockPosition();
+
+            // (a) BEST: step back up onto adjacent higher ground — usually the tunnel we
+            //     just came from, whose floor sits one block higher. No blocks needed.
+            Direction step = findStepUp(mc, feetNow);
+            if (step != null) {
+                aimAtFast(player, Vec3.atCenterOf(feetNow.relative(step).above()));
+                key(mc, mc.options.keyUp, true);
+                key(mc, mc.options.keyJump, true);
                 return;
             }
-            if (!player.onGround()) {
-                place(mc, fp.below(), "");   // mid-jump: place a block beneath → land a level up
+
+            // (b) open the ceiling so we can rise in place
+            BlockPos head2 = feetNow.above(2);
+            if (canMine(mc, head2)) {
+                swingAt(mc, head2);
+                return;
+            }
+
+            // (c) PILLAR: remember this spot, jump, and fill it mid-air next tick so we
+            //     land a level higher. Needs a block in the hotbar (pulled in if missing).
+            if (ensureHotbarBlock(mc)) {
+                pillarSpot = feetNow;   // fill it mid-air next tick
             }
             key(mc, mc.options.keyJump, true);
             return;
+        }
+        if (pillarSpot != null && !player.onGround()) {
+            // mid-jump over the spot we left — drop a block into it so we land higher
+            place(mc, pillarSpot, "");
+            key(mc, mc.options.keyJump, true);
+            return;
+        }
+        if (player.onGround()) {
+            pillarSpot = null;   // grounded at/above target — pillar done
         }
 
         // 5) travel direction toward the target
@@ -1009,6 +1036,34 @@ public final class Autopilot {
             return true;
         }
         return false;
+    }
+
+    /** A horizontal direction we can step UP one block into (solid step, 2 air above,
+     *  head clear to move) — typically the tunnel we came from. null if none. */
+    private Direction findStepUp(Minecraft mc, BlockPos feet) {
+        for (Direction d : Direction.Plane.HORIZONTAL) {
+            BlockPos n = feet.relative(d);
+            if (!passable(mc, n) && !hazard(mc, n)
+                && passable(mc, n.above()) && passable(mc, n.above(2))
+                && passable(mc, feet.above())) {
+                return d;
+            }
+        }
+        return null;
+    }
+
+    /** Make sure a placeable block is selected in the hotbar. True if one is/was found. */
+    private boolean ensureHotbarBlock(Minecraft mc) {
+        Inventory inv = mc.player.getInventory();
+        if (inv.getSelectedItem().getItem() instanceof BlockItem) {
+            return true;
+        }
+        int slot = findHotbar(inv, s -> s.getItem() instanceof BlockItem);
+        if (slot < 0) {
+            return false;
+        }
+        inv.setSelectedSlot(slot);
+        return true;
     }
 
     private BlockPos breakingPos = null;   // block we're actively breaking (start/continue)
