@@ -43,6 +43,47 @@ public final class CycleaConfig {
     // pause the scout when a big stash is found (default: keep scouting, just alert)
     public boolean stashPause = false;
 
+    // one-click preset bundles
+    public static final String[] PRESETS = {"Diamond Run", "Surface Scout", "All-Ore Miner", "Cautious"};
+    public int presetIdx = 0;
+
+    /** Apply a preset bundle of settings, then persist. */
+    public void applyPreset(int p) {
+        switch (p) {
+            case 1 -> {                       // Surface Scout
+                mode = 1;
+                stashLevel = 1;
+                stashPause = false;
+            }
+            case 2 -> {                       // All-Ore Miner
+                mode = 0;
+                oreSeekLevel = 3;
+                paceLevel = 1;
+                skipBases = true;
+            }
+            case 3 -> {                       // Cautious (slow, safe, XP ores)
+                mode = 0;
+                oreSeekLevel = 1;
+                paceLevel = 2;
+                skipBases = true;
+                skipRaided = true;
+            }
+            default -> {                      // Diamond Run
+                mode = 0;
+                oreSeekLevel = 1;
+                paceLevel = 1;
+                skipBases = true;
+                skipRaided = true;
+                oneByOne = false;
+            }
+        }
+        save();
+    }
+
+    public String presetLabel() {
+        return PRESETS[presetIdx % PRESETS.length];
+    }
+
     public String modeLabel() {
         return mode == 1 ? "Surface scout (find stashes)" : "Miner (strip to spawn)";
     }

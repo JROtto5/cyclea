@@ -25,6 +25,13 @@ public class CycleaConfigScreen extends Screen {
         int x = this.width / 2 - w / 2;
         int y = this.height / 8;
 
+        addRenderableWidget(Button.builder(presetMsg(), b -> {
+            c.presetIdx = (c.presetIdx + 1) % CycleaConfig.PRESETS.length;
+            c.applyPreset(c.presetIdx);
+            this.rebuildWidgets();   // refresh every button to the new values
+        }).bounds(x, y, w, h).build());
+        y += 26;
+
         addRenderableWidget(Button.builder(modeMsg(), b -> {
             c.cycleMode();
             b.setMessage(modeMsg());
@@ -99,6 +106,10 @@ public class CycleaConfigScreen extends Screen {
 
         addRenderableWidget(Button.builder(Component.literal("Done"), b -> this.onClose())
             .bounds(x, y, w, h).build());
+    }
+
+    private Component presetMsg() {
+        return Component.literal("◆ Apply preset: " + CycleaConfig.get().presetLabel());
     }
 
     private Component modeMsg() {

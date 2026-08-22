@@ -226,6 +226,20 @@ public final class Autopilot {
         mining = null;
     }
 
+    /** Working depth for the current dimension: overworld dives to the diamond band,
+     *  the Nether holds the ancient-debris band (above the bedrock floor), and the End
+     *  just mines flat at whatever level we start on (no bedrock floor to aim for). */
+    private int depthForDimension(Minecraft mc) {
+        var dim = mc.level.dimension();
+        if (dim == net.minecraft.world.level.Level.NETHER) {
+            return 14;
+        }
+        if (dim == net.minecraft.world.level.Level.END) {
+            return mc.player.blockPosition().getY();
+        }
+        return -59;
+    }
+
     private Autopilot() {
     }
 
@@ -262,7 +276,7 @@ public final class Autopilot {
                         + (int) moved + "m §7past '" + lastStopReason + "'");
                     handedOff = false;
                 }
-                targetY = -59;   // default diamond level, just above bedrock
+                targetY = depthForDimension(mc);
                 retarget(mc);
             }
         } else {
