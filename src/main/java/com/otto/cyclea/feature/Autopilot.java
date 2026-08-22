@@ -1860,46 +1860,57 @@ public final class Autopilot {
             return;
         }
 
-        // Find the nearest ready cane anywhere in range (throttled scan; sees a couple
-        // floors up/down so it heads for the staircase toward higher cane on its own).
-        if (--farmScanCd <= 0) {
-            farmFar = nearestHarvestCane(mc, 16, false);
-            farmScanCd = 5;
-        }
-        BlockPos caneTarget = farmFar;
-        if (caneTarget == null || !isCaneSegment(mc, caneTarget)) {
-            key(mc, mc.options.keyAttack, false);
-            wanderFarm(mc);          // no cane nearby — roam (rides stairs to other floors)
-            return;
-        }
-
-        // WALK toward the cane holding left-click at cane height — mows the whole row and
-        // climbs any steps/stairs on the way. Simple, like a player at an AFK cane farm.
-        double dx = caneTarget.getX() + 0.5 - p.getX();
-        double dz = caneTarget.getZ() + 0.5 - p.getZ();
-        double distXZ = Math.hypot(dx, dz);
-        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-
+        // ROOMBA: walk straight holding left-click at cane height; at a wall, turn a
+        // consistent way and COMMIT to it (no re-deciding every tick = no spinning); climb
+        // any step (so it rides the staircase to other floors just by walking into it).
         BlockPos feet = p.blockPosition();
-        Direction d = Direction.fromYRot(yaw);
-        // steer around a real wall (not a 1-step) to keep moving toward the cane
-        if (mc.level.getBlockState(feet.relative(d).above()).blocksMotion() && !solidStep(mc, feet.relative(d))) {
-            boolean leftOpen = !mc.level.getBlockState(
-                feet.relative(d.getCounterClockWise()).above()).blocksMotion();
-            yaw += leftOpen ? -50f : 50f;
-            d = Direction.fromYRot(yaw);
+        if (farmDir == null) {
+            farmDir = Direction.from2DDataValue(rng.nextInt(4));
         }
-        float pitch = distXZ < 1.6 ? -12f : 0f;   // level to mow the row; tip down on a close stalk
-        aim(p, yaw, pitch);
+        // pick a new heading only when blocked or the commit timer runs out
+        if (!farmWalkable(mc, feet, farmDir) || --farmWanderTicks <= 0) {
+            Direction[] opts = {                         // right-hand wall follow, then reverse
+                farmDir.getClockWise(), farmDir, farmDir.getCounterClockWise(), farmDir.getOpposite()
+            };
+            Direction chosen = farmDir.getOpposite();    // dead-end fallback: turn around
+            for (Direction o : opts) {
+                if (farmWalkable(mc, feet, o)) {
+                    chosen = o;
+                    break;
+                }
+            }
+            farmDir = chosen;
+            farmWanderTicks = 24 + rng.nextInt(24);      // commit ~1.5–2.4s so it can't spin
+        }
+        aim(p, farmDir.toYRot(), 0f);                    // look level — mows cane at body height
         key(mc, mc.options.keySprint, false);
         key(mc, mc.options.keyUp, true);
-        key(mc, mc.options.keyJump,
-            caneTarget.getY() > feet.getY() && solidStep(mc, feet.relative(d)) && !p.isInWater());
+        key(mc, mc.options.keyJump, solidStep(mc, feet.relative(farmDir)) && !p.isInWater());
 
-        // swing ONLY when the crosshair is actually on cane — never chew the farm structure
+        // swing ONLY when the crosshair is on cane — never chew carpet/water/structure
         boolean onCane = mc.hitResult instanceof BlockHitResult bhr
             && mc.level.getBlockState(bhr.getBlockPos()).is(Blocks.SUGAR_CANE);
         key(mc, mc.options.keyAttack, onCane);
+    }
+
+    /** Can we step one block in {@code dir} — no wall, no wading into water, floor to
+     *  stand on (carpet counts), or a climbable 1-step? */
+    private boolean farmWalkable(Minecraft mc, BlockPos feet, Direction dir) {
+        BlockPos a = feet.relative(dir);
+        BlockState sa = mc.level.getBlockState(a);
+        if (sa.is(Blocks.WATER) || sa.is(Blocks.LAVA)) {
+            return false;                                // don't wade into the channels
+        }
+        if (sa.isCollisionShapeFullBlock(mc.level, a)) { // a full block ahead — only OK as a 1-step
+            return !mc.level.getBlockState(a.above()).blocksMotion()
+                && !mc.level.getBlockState(a.above(2)).blocksMotion();
+        }
+        if (mc.level.getBlockState(a.above()).blocksMotion()) {
+            return false;                                // wall at head height
+        }
+        // something to stand on: carpet/slab (non-empty collision) at feet, or solid below
+        return !sa.getCollisionShape(mc.level, a).isEmpty()
+            || mc.level.getBlockState(a.below()).blocksMotion();
     }
 
     private static int countItem(net.minecraft.client.player.LocalPlayer p, String path) {

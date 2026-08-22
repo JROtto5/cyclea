@@ -3,7 +3,7 @@ plugins {
     id 'java'
 }
 
-version = '5.55.0'
+version = '5.56.0'
 group = 'com.otto'
 base { archivesName = 'cyclea' }
 
