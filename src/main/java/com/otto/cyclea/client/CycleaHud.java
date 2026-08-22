@@ -25,10 +25,12 @@ public class CycleaHud implements HudElement {
     public void extractRenderState(GuiGraphicsExtractor g, DeltaTracker delta) {
         Minecraft mc = Minecraft.getInstance();
         CycleaState s = CycleaState.get();
-        // see-through ore ESP draws whenever ores are being scanned (search OR auto on),
-        // independent of the base-finder panel below
-        if (mc.player != null && CycleaConfig.get().oreEsp) {
-            drawOreEsp(g, mc, s);
+        // see-through overlay + big alerts draw independent of the base-finder panel
+        if (mc.player != null) {
+            if (CycleaConfig.get().oreEsp || CycleaConfig.get().tracers) {
+                renderWorldOverlay(g, mc, s);
+            }
+            renderBigAlert(g, mc, s);
         }
         if (!s.isActive() || mc.player == null) {
             return;
@@ -176,7 +178,7 @@ public class CycleaHud implements HudElement {
      * See-through overlay: ore boxes, tracer lines to ores/chests, and the travel route —
      * all projected onto the screen so they read like X-ray/ESP without a world-render hook.
      */
-    private void drawOreEsp(GuiGraphicsExtractor g, Minecraft mc, CycleaState s) {
+    static void renderWorldOverlay(GuiGraphicsExtractor g, Minecraft mc, CycleaState s) {
         Camera cam = mc.gameRenderer.mainCamera();
         if (cam == null || !cam.isInitialized()) {
             return;
@@ -185,6 +187,7 @@ public class CycleaHud implements HudElement {
         if (!p.ok) {
             return;
         }
+        boolean boxes = CycleaConfig.get().oreEsp;
         boolean tracers = CycleaConfig.get().tracers;
         int ox = p.gw / 2;
         int oy = p.gh - 2;   // tracers fan out from the bottom-center
@@ -197,11 +200,13 @@ public class CycleaHud implements HudElement {
                 continue;
             }
             int col = 0xFF000000 | o[3];
-            int half = Math.max(2, Math.min(26, (int) (0.85 / Math.max(1, sp[2]) * p.f)));
-            g.fill(sp[0] - half, sp[1] - half, sp[0] + half, sp[1] - half + 1, col);
-            g.fill(sp[0] - half, sp[1] + half - 1, sp[0] + half, sp[1] + half, col);
-            g.fill(sp[0] - half, sp[1] - half, sp[0] - half + 1, sp[1] + half, col);
-            g.fill(sp[0] + half - 1, sp[1] - half, sp[0] + half, sp[1] + half, col);
+            if (boxes) {
+                int half = Math.max(2, Math.min(26, (int) (0.85 / Math.max(1, sp[2]) * p.f)));
+                g.fill(sp[0] - half, sp[1] - half, sp[0] + half, sp[1] - half + 1, col);
+                g.fill(sp[0] - half, sp[1] + half - 1, sp[0] + half, sp[1] + half, col);
+                g.fill(sp[0] - half, sp[1] - half, sp[0] - half + 1, sp[1] + half, col);
+                g.fill(sp[0] + half - 1, sp[1] - half, sp[0] + half, sp[1] + half, col);
+            }
             if (tracers && drawn < 10) {
                 line(g, ox, oy, sp[0], sp[1], (col & 0x00FFFFFF) | 0x77000000);
             }
@@ -260,7 +265,7 @@ public class CycleaHud implements HudElement {
     }
 
     /** Cheap 2D line via stepped 1-px fills (clipped to the screen). */
-    private void line(GuiGraphicsExtractor g, int x1, int y1, int x2, int y2, int color) {
+    private static void line(GuiGraphicsExtractor g, int x1, int y1, int x2, int y2, int color) {
         int dx = Math.abs(x2 - x1);
         int dy = Math.abs(y2 - y1);
         int steps = Math.max(dx, dy);
@@ -272,6 +277,37 @@ public class CycleaHud implements HudElement {
             int py = y1 + (y2 - y1) * i / steps;
             g.fill(px, py, px + 1, py + 1, color);
         }
+    }
+
+    /** A big, centered, pulsing on-screen banner for finds — draws over the world AND
+     *  over any open menu (called from both the HUD and the screen-render hook). */
+    static void renderBigAlert(GuiGraphicsExtractor g, Minecraft mc, CycleaState s) {
+        long left = s.getAlertUntilMs() - System.currentTimeMillis();
+        if (left <= 0 || s.getAlertText().isEmpty()) {
+            return;
+        }
+        String msg = s.getAlertText();
+        int gw = g.guiWidth();
+        int gh = g.guiHeight();
+        int cx = gw / 2;
+        int cy = gh / 3;
+        // pulse the opacity so it grabs the eye
+        double pulse = 0.55 + 0.45 * Math.abs(Math.sin(left / 180.0));
+        int alpha = (int) (pulse * 255) & 0xFF;
+        int col = (alpha << 24) | (s.getAlertColor() & 0x00FFFFFF);
+        Font font = mc.font;
+        int tw = font.width(msg);
+        // translucent backing bar
+        g.fill(cx - tw - 18, cy - 16, cx + tw + 18, cy + 20, (Math.min(alpha, 160) << 24));
+        g.fill(cx - tw - 18, cy - 16, cx + tw + 18, cy - 14, col);   // top edge
+        g.fill(cx - tw - 18, cy + 18, cx + tw + 18, cy + 20, col);   // bottom edge
+        // BIG text: scale the GUI matrix around the center point
+        var pose = g.pose();
+        pose.pushMatrix();
+        pose.translate(cx, cy);
+        pose.scale(2.0f, 2.0f);
+        g.text(font, msg, -tw / 2, -4, col, true);
+        pose.popMatrix();
     }
 
     private static String proximity(CycleaState s) {

@@ -759,11 +759,14 @@ public final class Autopilot {
             if (onFind == 0) {
                 // pin & keep working (default)
                 if (pinned > 0) {
+                    CycleaState.get().flashAlert("★ BASE FOUND ★", 0xFF55FF66, 4000);
+                    mc.player.playSound(net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 1.4f);
                     say(mc, "§b⚑ " + pinned + " base" + (pinned == 1 ? "" : "s")
                         + " pinned to map §7— I'll keep mining, you go check them");
                 }
             } else if (!worth.isEmpty()) {
                 TargetScanner.Base best = richest(worth);
+                CycleaState.get().flashAlert("★ BASE FOUND ★", 0xFF55FF66, 4500);
                 mc.player.playSound(net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 1.4f);
                 say(mc, "§a★ BASE FOUND §f" + best.chests() + " chests, " + best.shulkers()
                     + " shulkers §7at §f" + best.center().getX() + "," + best.center().getY()
@@ -1822,6 +1825,7 @@ public final class Autopilot {
             }
             int depth = Mth.floor(mc.player.getY()) - b.center().getY();
             MinimapBridge.pushStash(b, depth);
+            CycleaState.get().flashAlert("⚑ BIG STASH BELOW ⚑", 0xFFFFC020, 4500);
             mc.player.playSound(net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 0.6f);
             say(mc, "§6§l⚑ BIG STASH BELOW §r§e" + b.chests() + " chests, " + b.shulkers()
                 + " shulkers §7~" + depth + " down at §f" + b.center().getX() + ","

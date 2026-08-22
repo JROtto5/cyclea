@@ -9,6 +9,7 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -68,6 +69,22 @@ public class CycleaClient implements ClientModInitializer {
         HudElementRegistry.addLast(
             Identifier.fromNamespaceAndPath("cyclea", "radar"), new CycleaHud());
         ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
+
+        // draw the see-through overlay + big alerts ON TOP of any open menu, so the polish
+        // (and "BASE!" banners) stay visible while you're in the pause/inventory screen
+        ScreenEvents.AFTER_INIT.register((client, screen, sw, sh) ->
+            ScreenEvents.afterForeground(screen).register((scr, gx, mx, my, dt) -> {
+                Minecraft m = Minecraft.getInstance();
+                CycleaState st = CycleaState.get();
+                if (m.player == null) {
+                    return;
+                }
+                if (CycleaConfig.get().oreEsp || CycleaConfig.get().tracers) {
+                    CycleaHud.renderWorldOverlay(gx, m, st);
+                }
+                CycleaHud.renderBigAlert(gx, m, st);
+            }));
+
         loadPriorFinds();
     }
 
@@ -125,6 +142,7 @@ public class CycleaClient implements ClientModInitializer {
             BlockPos me = mc.player.blockPosition();
             BlockPos them = nearest.blockPosition();
             String dir = compass(them.getX() - me.getX(), them.getZ() - me.getZ());
+            CycleaState.get().flashAlert("⚠ PLAYER NEARBY ⚠", 0xFFFF4040, 5000);
             mc.player.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 0.5f);
             say(mc, "§c⚠ PLAYER NEARBY: §f" + nearest.getName().getString()
                 + " §7" + (int) best + "m " + dir + " §8(y" + them.getY() + ") — press §fG§8 to seal in");
@@ -263,6 +281,7 @@ public class CycleaClient implements ClientModInitializer {
 
         int fresh = st.recordBases(baseCenters);
         if (fresh > 0) {
+            st.flashAlert("★ BASE FOUND ★", 0xFF55FF66, 4000);
             mc.player.playSound(SoundEvents.EXPERIENCE_ORB_PICKUP, 0.7f, 1.6f);
             say(mc, "§a✚ " + fresh + " new base" + (fresh > 1 ? "s" : "")
                 + " found §7(session " + st.getSessionBaseTotal() + ")");

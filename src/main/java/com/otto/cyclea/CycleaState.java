@@ -205,6 +205,29 @@ public final class CycleaState {
         this.oreBlips = b;
     }
 
+    // big on-screen alert banner
+    private volatile String alertText = "";
+    private volatile int alertColor = 0xFFFFFFFF;
+    private volatile long alertUntilMs = 0;
+
+    public void flashAlert(String text, int color, long ms) {
+        this.alertText = text;
+        this.alertColor = color;
+        this.alertUntilMs = System.currentTimeMillis() + ms;
+    }
+
+    public String getAlertText() {
+        return alertText;
+    }
+
+    public int getAlertColor() {
+        return alertColor;
+    }
+
+    public long getAlertUntilMs() {
+        return alertUntilMs;
+    }
+
     // container tracer targets: {x, y, z, rgb}
     private volatile List<int[]> containerBlips = List.of();
 
