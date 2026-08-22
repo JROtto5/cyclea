@@ -1872,7 +1872,7 @@ public final class Autopilot {
         BlockPos feet = p.blockPosition();
         // nearest ready cane on THIS level (throttled scan, cached)
         if (--farmScanCd <= 0) {
-            farmFar = nearestHarvestCane(mc, feet, 24);
+            farmFar = nearestHarvestCane(mc, feet, 24, -1, 4);
             farmScanCd = 4;
         }
         BlockPos cane = (farmFar != null && isCaneSegment(mc, farmFar)) ? farmFar : null;
@@ -1901,18 +1901,20 @@ public final class Autopilot {
             return;
         }
 
-        // this level is clear — go UP to the next one via a staircase or ladder
-        BlockPos stairs = nearestStairs(mc, 16);
-        if (stairs != null) {
-            walkToward(mc, stairs.getX() + 0.5, stairs.getZ() + 0.5, true);
+        // this floor is clear — head toward cane on ANOTHER floor. Walking toward higher
+        // cane climbs the staircase (full blocks OR stair blocks); no stair-detection needed.
+        BlockPos other = nearestHarvestCane(mc, feet, 28, -10, 16);
+        if (other != null) {
+            walkToward(mc, other.getX() + 0.5, other.getZ() + 0.5, other.getY() > feet.getY() + 1);
             return;
         }
+        // truly no cane anywhere in range — fall back to ladder, else roam
         BlockPos lad = nearestLadder(mc, 8, true);
         if (lad != null) {
             climbLadder(mc, lad, true);
             return;
         }
-        wanderFarm(mc);   // no stairs/ladder found — roam to locate them
+        wanderFarm(mc);
     }
 
     /** Can we step one block in {@code dir} — no wall, no wading into water, floor to
@@ -1946,15 +1948,15 @@ public final class Autopilot {
         return n;
     }
 
-    /** Nearest harvestable cane on THIS level (a sugar_cane with sugar_cane below it,
-     *  within a tight vertical band so it clears the current floor before going up). */
-    private BlockPos nearestHarvestCane(Minecraft mc, BlockPos feet, int r) {
+    /** Nearest harvestable cane (a sugar_cane with sugar_cane below it) within a vertical
+     *  band [loDy, hiDy] relative to the feet — tight band = this floor; wide = any floor. */
+    private BlockPos nearestHarvestCane(Minecraft mc, BlockPos feet, int r, int loDy, int hiDy) {
         Vec3 eye = mc.player.getEyePosition();
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
         BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
         for (int dx = -r; dx <= r; dx++) {
-            for (int dy = -1; dy <= 4; dy++) {   // current level only (cane grows a few up)
+            for (int dy = loDy; dy <= hiDy; dy++) {
                 for (int dz = -r; dz <= r; dz++) {
                     m.set(feet.getX() + dx, feet.getY() + dy, feet.getZ() + dz);
                     if (!mc.level.getBlockState(m).is(Blocks.SUGAR_CANE)
