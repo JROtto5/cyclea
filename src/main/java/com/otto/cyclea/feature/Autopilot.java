@@ -1977,31 +1977,38 @@ public final class Autopilot {
         key(mc, mc.options.keyUp, dist > 0.8);
     }
 
-    /** Walk (and optionally climb/jump) toward a horizontal spot. */
+    /** True only if there's a REAL solid step up one block ahead (not a plant like cane —
+     *  those have no collision, so we should walk straight through, never hop). */
+    private boolean solidStep(Minecraft mc, BlockPos ahead) {
+        return mc.level.getBlockState(ahead).blocksMotion()
+            && !mc.level.getBlockState(ahead.above()).blocksMotion();
+    }
+
+    /** Walk smoothly toward a spot; jump ONLY to climb a real step or a ladder. */
     private void walkToward(Minecraft mc, double tx, double tz, boolean up) {
         var p = mc.player;
         double dx = tx - p.getX();
         double dz = tz - p.getZ();
         float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        aim(p, yaw, up ? -8f : 4f);
+        aim(p, yaw, up ? -6f : 6f);   // eased turn (aim() smooths it) — no snapping
         key(mc, mc.options.keyUp, true);
         key(mc, mc.options.keySprint, false);
         BlockPos ahead = new BlockPos(Mth.floor(tx), p.blockPosition().getY(), Mth.floor(tz));
-        boolean blocked = !passable(mc, ahead);
-        key(mc, mc.options.keyJump, up || blocked);   // climb ladders / hop small steps
+        // jump ONLY to climb a real step or a ladder — never bob in the farm's water channels
+        key(mc, mc.options.keyJump, up || (solidStep(mc, ahead) && !p.isInWater()));
     }
 
     private void wanderFarm(Minecraft mc) {
         if (--farmWanderTicks <= 0) {
             farmDir = Direction.from2DDataValue(rng.nextInt(4));
-            farmWanderTicks = 30 + rng.nextInt(30);
+            farmWanderTicks = 40 + rng.nextInt(40);   // longer legs — calmer, not twitchy
         }
         var p = mc.player;
         aim(p, farmDir.toYRot(), 2f);
         BlockPos ahead = p.blockPosition().relative(farmDir);
         key(mc, mc.options.keyUp, true);
         key(mc, mc.options.keySprint, false);
-        key(mc, mc.options.keyJump, !passable(mc, ahead));
+        key(mc, mc.options.keyJump, solidStep(mc, ahead) && !p.isInWater());   // real steps only
     }
 
     // ---------------- Stash vault builder ----------------
