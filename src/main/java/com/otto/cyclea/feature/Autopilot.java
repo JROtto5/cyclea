@@ -418,8 +418,13 @@ public final class Autopilot {
                 stop(mc, "internal error (safe halt)");
             }
         }
-        // remember where the bot left the camera, so next tick we can tell if YOU moved it
-        if (active && mc.player != null && manualPauseTicks == 0) {
+        // Track the camera EVERY tick (even while paused) so we compare against the
+        // most recent rotation, not a stale one. This is critical: if we only updated
+        // when un-paused, a single mouse nudge would latch the pause ON forever (the
+        // reference never catches up), freezing the bot silently — the "stops for no
+        // reason / must toggle off-on" bug. Now, the instant you stop moving the mouse,
+        // the reference catches up, the diff drops to 0, and it resumes on its own.
+        if (active && mc.player != null) {
             botYaw = mc.player.getYRot();
             botPitch = mc.player.getXRot();
         }
