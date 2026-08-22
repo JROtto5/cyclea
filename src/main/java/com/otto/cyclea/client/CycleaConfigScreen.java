@@ -23,7 +23,25 @@ public class CycleaConfigScreen extends Screen {
         int w = 240;
         int h = 20;
         int x = this.width / 2 - w / 2;
-        int y = this.height / 4;
+        int y = this.height / 8;
+
+        addRenderableWidget(Button.builder(modeMsg(), b -> {
+            c.cycleMode();
+            b.setMessage(modeMsg());
+        }).bounds(x, y, w, h).build());
+        y += 26;
+
+        addRenderableWidget(Button.builder(stashMsg(), b -> {
+            c.cycleStashLevel();
+            b.setMessage(stashMsg());
+        }).bounds(x, y, w, h).build());
+        y += 26;
+
+        addRenderableWidget(Button.builder(stashPauseMsg(), b -> {
+            c.cycleStashPause();
+            b.setMessage(stashPauseMsg());
+        }).bounds(x, y, w, h).build());
+        y += 26;
 
         addRenderableWidget(Button.builder(turnMsg(), b -> {
             c.cycleTurn();
@@ -81,6 +99,18 @@ public class CycleaConfigScreen extends Screen {
 
         addRenderableWidget(Button.builder(Component.literal("Done"), b -> this.onClose())
             .bounds(x, y, w, h).build());
+    }
+
+    private Component modeMsg() {
+        return Component.literal("Mode [M]: " + CycleaConfig.get().modeLabel());
+    }
+
+    private Component stashMsg() {
+        return Component.literal("Stash alert size: " + CycleaConfig.get().stashLabel());
+    }
+
+    private Component stashPauseMsg() {
+        return Component.literal("Pause at stash: " + CycleaConfig.get().stashPauseLabel());
     }
 
     private Component turnMsg() {

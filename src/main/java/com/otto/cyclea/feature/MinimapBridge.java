@@ -71,6 +71,26 @@ public final class MinimapBridge {
         };
     }
 
+    /** Pin a big underground stash found by the surface scout. Gold, distinct name. */
+    public static boolean pushStash(TargetScanner.Base b, int depth) {
+        try {
+            WaypointSet set = currentSet();
+            if (set == null) {
+                return false;
+            }
+            BlockPos p = b.center();
+            if (hasWaypointAt(set, p)) {
+                return true;
+            }
+            String name = "STASH Y" + p.getY() + " " + b.chests() + "c " + b.shulkers()
+                + "s (-" + depth + ")";
+            set.add(new Waypoint(p.getX(), p.getY(), p.getZ(), name, "$", WaypointColor.GOLD));
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     /** Remove every base waypoint Cyclea placed (names starting with "Base "). Returns how many were removed. */
     public static int clearBaseWaypoints() {
         try {

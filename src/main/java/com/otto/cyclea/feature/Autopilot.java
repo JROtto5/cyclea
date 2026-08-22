@@ -144,6 +144,25 @@ public final class Autopilot {
         return searchMode.name();
     }
 
+    // surface-scout state
+    private int stashScanTick = 0;
+    private int surfDetourTicks = 0;
+    private int surfDetourSign = 1;
+    private final java.util.Set<Long> alertedStashes = new java.util.HashSet<>();
+
+    /** Switch between Miner and Surface-scout mode (persists to config). */
+    public String toggleMode(Minecraft mc) {
+        CycleaConfig.get().cycleMode();
+        if (active) {
+            resetRunState();
+            searchMode = CycleaConfig.get().mode == 1 ? SearchMode.SWEEP : searchMode;
+            retarget(mc);
+        }
+        String lbl = CycleaConfig.get().modeLabel();
+        say(mc, "§b[Cyclea] mode → §f" + lbl);
+        return lbl;
+    }
+
     /** Point the bot at its first goal for the current mode. */
     private void retarget(Minecraft mc) {
         if (mc.player == null) {
@@ -270,6 +289,9 @@ public final class Autopilot {
         aliveX = Double.NaN;
         aliveInv = -1;
         errStreak = 0;
+        stashScanTick = 0;
+        surfDetourTicks = 0;
+        alertedStashes.clear();
         jumpTicks = 0;
         botYaw = Float.NaN;
         manualPauseTicks = 0;
@@ -472,6 +494,54 @@ public final class Autopilot {
             return;   // fighting takes priority this tick
         }
 
+        // 1b2) SURFACE SCOUT mode: walk on top, deep-scan for stashes, alert you.
+        if (CycleaConfig.get().mode == 1) {
+            surfaceStep(mc);
+            return;
+        }
+
+        // 1b3) Y-60 CLIMB — TOP PRIORITY. If we've sunk below the target depth, getting
+        //      back up beats everything else. This runs BEFORE the anti-stuck jumping (which
+        //      was keeping us airborne so the old grounded check never fired — the bug that
+        //      made it "never figure out Y-60"). Works whether grounded OR airborne.
+        BlockPos feetC = player.blockPosition();
+        if (feetC.getY() < targetY) {
+            key(mc, mc.options.keyUp, false);
+            key(mc, mc.options.keySprint, false);
+
+            // (a) BEST: step onto adjacent higher ground (usually the tunnel we came
+            //     from, one block up). No blocks needed. Check cardinals + diagonals.
+            Direction stepUp = findStepUp(mc, feetC);
+            if (stepUp != null) {
+                aimAtFast(player, Vec3.atCenterOf(feetC.relative(stepUp)));
+                key(mc, mc.options.keyUp, true);
+                key(mc, mc.options.keyJump, true);
+                return;
+            }
+
+            // (b) clear the ceiling so we can rise in place
+            BlockPos head2 = feetC.above(2);
+            if (canMine(mc, head2)) {
+                swingAt(mc, head2);
+                return;
+            }
+
+            // (c) PILLAR: jump and fill the cell under us so we land a level higher.
+            if (player.onGround()) {
+                if (ensureHotbarBlock(mc)) {
+                    pillarSpot = feetC;    // fill it next tick, mid-air
+                }
+                key(mc, mc.options.keyJump, true);
+            } else if (pillarSpot != null) {
+                place(mc, pillarSpot, "");
+                key(mc, mc.options.keyJump, true);
+            } else {
+                key(mc, mc.options.keyJump, true);
+            }
+            return;
+        }
+        pillarSpot = null;   // at/above target depth — no pillar pending
+
         // 1c) inventory full — don't just stop and wait for you. Toss junk (cobble/dirt/
         //     gravel/etc.) to make room and keep mining. Only stop if it's full of stuff
         //     actually worth keeping.
@@ -589,48 +659,6 @@ public final class Autopilot {
             key(mc, mc.options.keyJump, false);
         }
 
-        // climb back to Y-59 if we sank below it (the Y-60 bedrock trap). This is the
-        // #1 cause of it wedging and needing a manual off/on, so it's aggressive and
-        // has three fallbacks — it MUST get back up.
-        if (player.onGround() && player.blockPosition().getY() < targetY) {
-            key(mc, mc.options.keyUp, false);
-            key(mc, mc.options.keySprint, false);
-            BlockPos feetNow = player.blockPosition();
-
-            // (a) BEST: step back up onto adjacent higher ground — usually the tunnel we
-            //     just came from, whose floor sits one block higher. No blocks needed.
-            Direction step = findStepUp(mc, feetNow);
-            if (step != null) {
-                aimAtFast(player, Vec3.atCenterOf(feetNow.relative(step).above()));
-                key(mc, mc.options.keyUp, true);
-                key(mc, mc.options.keyJump, true);
-                return;
-            }
-
-            // (b) open the ceiling so we can rise in place
-            BlockPos head2 = feetNow.above(2);
-            if (canMine(mc, head2)) {
-                swingAt(mc, head2);
-                return;
-            }
-
-            // (c) PILLAR: remember this spot, jump, and fill it mid-air next tick so we
-            //     land a level higher. Needs a block in the hotbar (pulled in if missing).
-            if (ensureHotbarBlock(mc)) {
-                pillarSpot = feetNow;   // fill it mid-air next tick
-            }
-            key(mc, mc.options.keyJump, true);
-            return;
-        }
-        if (pillarSpot != null && !player.onGround()) {
-            // mid-jump over the spot we left — drop a block into it so we land higher
-            place(mc, pillarSpot, "");
-            key(mc, mc.options.keyJump, true);
-            return;
-        }
-        if (player.onGround()) {
-            pillarSpot = null;   // grounded at/above target — pillar done
-        }
 
         // 5) travel direction toward the target
         double dx = targetX - player.getX();
@@ -1080,17 +1108,37 @@ public final class Autopilot {
     }
 
     /** A horizontal direction we can step UP one block into (solid step, 2 air above,
-     *  head clear to move) — typically the tunnel we came from. null if none. */
+     *  head clear to move) — typically the tunnel we came from. null if none. Checks
+     *  the four cardinals first, then the diagonals (with corner-clearance). */
     private Direction findStepUp(Minecraft mc, BlockPos feet) {
+        if (!passable(mc, feet.above())) {
+            return null;   // our own head is blocked — can't move sideways yet
+        }
         for (Direction d : Direction.Plane.HORIZONTAL) {
             BlockPos n = feet.relative(d);
-            if (!passable(mc, n) && !hazard(mc, n)
-                && passable(mc, n.above()) && passable(mc, n.above(2))
-                && passable(mc, feet.above())) {
+            if (isStepUp(mc, n)) {
                 return d;
             }
         }
+        // diagonals: need the step corner solid AND both flanking cardinals open to pass
+        Direction[] h = {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST};
+        for (int i = 0; i < 4; i++) {
+            Direction a = h[i];
+            Direction b = h[(i + 1) & 3];
+            BlockPos diag = feet.relative(a).relative(b);
+            if (isStepUp(mc, diag)
+                && passable(mc, feet.relative(a).above()) && passable(mc, feet.relative(b).above())) {
+                return a;   // head that general way; the jump carries us onto the corner
+            }
+        }
         return null;
+    }
+
+    /** True if {@code n} (at feet level) is a solid block we can jump up onto: solid,
+     *  safe, with two air blocks above to stand in. */
+    private boolean isStepUp(Minecraft mc, BlockPos n) {
+        return !passable(mc, n) && !hazard(mc, n) && !hasHazardNeighbor(mc, n)
+            && passable(mc, n.above()) && passable(mc, n.above(2));
     }
 
     /** Bulk stone/dirt/gravel we mine through but don't care to keep. */
@@ -1115,6 +1163,99 @@ public final class Autopilot {
             return true;
         }
         return false;
+    }
+
+    // ---------------- Surface scout mode ----------------
+
+    /** One tick of surface-scout: eat if needed, deep-scan for stashes, travel on top. */
+    private void surfaceStep(Minecraft mc) {
+        if (handleEating(mc)) {
+            return;
+        }
+        if (++stashScanTick >= 30) {          // ~1.5s between scans
+            stashScanTick = 0;
+            scanForStashes(mc);
+            if (!active) {
+                return;                       // stashPause stopped us
+            }
+        }
+        surfaceTravel(mc);
+    }
+
+    /** Scan loaded chunks for big underground container clusters; alert + pin new ones. */
+    private void scanForStashes(Minecraft mc) {
+        TargetScanner.Scan scan = TargetScanner.scan(mc);
+        int[] th = CycleaConfig.get().stashThreshold();
+        for (TargetScanner.Base b : scan.bases()) {
+            boolean big = b.chests() >= th[0] || b.shulkers() >= th[1];
+            if (!big || !alertedStashes.add(b.center().asLong())) {
+                continue;                     // too small, or already alerted
+            }
+            int depth = Mth.floor(mc.player.getY()) - b.center().getY();
+            MinimapBridge.pushStash(b, depth);
+            mc.player.playSound(net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 0.6f);
+            say(mc, "§6§l⚑ BIG STASH BELOW §r§e" + b.chests() + " chests, " + b.shulkers()
+                + " shulkers §7~" + depth + " down at §f" + b.center().getX() + ","
+                + b.center().getY() + "," + b.center().getZ() + " §7— pinned. " + lootRating(b));
+            if (!b.loot().isEmpty()) {
+                say(mc, "§7   loot: §f" + b.loot());
+            }
+            if (CycleaConfig.get().stashPause) {
+                stop(mc, "§6big stash found — dig down, or press O to keep scouting");
+                return;
+            }
+        }
+    }
+
+    /** Walk across the surface toward the serpentine sweep target, non-destructively:
+     *  step up hills, swim, and veer around water/lava/cliffs (never mines). */
+    private void surfaceTravel(Minecraft mc) {
+        var player = mc.player;
+        double dx = targetX - player.getX();
+        double dz = targetZ - player.getZ();
+        if (Math.abs(dx) < 3 && Math.abs(dz) < 3) {
+            if (searchMode == SearchMode.SWEEP) {
+                advanceSpiral();              // reached a corner — turn, keep covering ground
+                newLeg(mc);
+            } else {
+                stop(mc, "§areached spawn — surface scout done (press O to sweep again)");
+            }
+            return;
+        }
+
+        float baseYaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float yaw = baseYaw;
+        if (surfDetourTicks > 0) {
+            yaw = baseYaw + surfDetourSign * 55f;
+            surfDetourTicks--;
+        }
+        aim(player, yaw, 15f);               // look where we're going, slightly down
+
+        key(mc, mc.options.keyUp, true);
+        key(mc, mc.options.keySprint, true);
+
+        double r = Math.toRadians(yaw);
+        double lx = -Math.sin(r);
+        double lz = Math.cos(r);
+        BlockPos feet = player.blockPosition();
+        BlockPos ahead = new BlockPos(Mth.floor(player.getX() + lx * 1.4),
+            feet.getY(), Mth.floor(player.getZ() + lz * 1.4));
+
+        boolean liquidAhead = hazard(mc, ahead) || hazard(mc, ahead.below()) || hazard(mc, ahead.above());
+        boolean stepAhead = !passable(mc, ahead) && passable(mc, ahead.above()) && passable(mc, ahead.above(2));
+        boolean cliffAhead = passable(mc, ahead) && passable(mc, ahead.below())
+            && passable(mc, ahead.below().below());
+
+        if (stepAhead || player.isInWater()) {
+            key(mc, mc.options.keyJump, true);   // hop a rise, or swim up
+        } else {
+            key(mc, mc.options.keyJump, false);
+        }
+
+        if ((liquidAhead || cliffAhead) && surfDetourTicks == 0) {
+            surfDetourSign = ((feet.getX() + feet.getZ()) & 1) == 0 ? 1 : -1;
+            surfDetourTicks = 14;                // veer aside for ~0.7s, then re-aim at target
+        }
     }
 
     /** Make sure a placeable block is selected in the hotbar. True if one is/was found. */

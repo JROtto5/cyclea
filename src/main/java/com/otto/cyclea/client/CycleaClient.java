@@ -40,6 +40,7 @@ public class CycleaClient implements ClientModInitializer {
     private KeyMapping pinKey;
     private KeyMapping autopilotKey;
     private KeyMapping searchModeKey;
+    private KeyMapping modeKey;
     private KeyMapping configKey;
     private int tickCounter = 0;
     private boolean wasAlive = true;
@@ -53,6 +54,7 @@ public class CycleaClient implements ClientModInitializer {
         pinKey = reg("key.cyclea.pin", GLFW.GLFW_KEY_P);
         autopilotKey = reg("key.cyclea.autopilot", GLFW.GLFW_KEY_O);
         searchModeKey = reg("key.cyclea.searchmode", GLFW.GLFW_KEY_K);
+        modeKey = reg("key.cyclea.mode", GLFW.GLFW_KEY_M);
         configKey = reg("key.cyclea.config", GLFW.GLFW_KEY_J);
 
         CycleaConfig.get().load();
@@ -146,6 +148,9 @@ public class CycleaClient implements ClientModInitializer {
             String m = Autopilot.get().toggleSearchMode(mc);
             say(mc, "§6[Autopilot] §7search mode → §f" + m
                 + ("SWEEP".equals(m) ? " §7(spiral-search this area)" : " §7(beeline to spawn)"));
+        }
+        while (modeKey.consumeClick()) {
+            Autopilot.get().toggleMode(mc);   // Miner ⇄ Surface scout
         }
 
         // drive the bot every tick (it self-guards and no-ops when off)

@@ -35,6 +35,54 @@ public final class CycleaConfig {
     public boolean oneByOne = false;
     // 0 = fast (every tick), 1 = normal (every 2), 2 = slow (every 3) — pace vs the server
     public int paceLevel = 1;
+    // operating mode: 0 = Miner (strip toward spawn), 1 = Surface scout (walk on top,
+    // deep-scan for big underground stashes, alert you)
+    public int mode = 0;
+    // stash-alert sensitivity for surface mode: 0 = any, 1 = big (default), 2 = huge
+    public int stashLevel = 1;
+    // pause the scout when a big stash is found (default: keep scouting, just alert)
+    public boolean stashPause = false;
+
+    public String modeLabel() {
+        return mode == 1 ? "Surface scout (find stashes)" : "Miner (strip to spawn)";
+    }
+
+    public void cycleMode() {
+        mode = (mode + 1) % 2;
+        save();
+    }
+
+    /** {chestCount, shulkerCount} thresholds for a "worth-alerting" stash. */
+    public int[] stashThreshold() {
+        return switch (stashLevel) {
+            case 0 -> new int[]{6, 2};    // any decent cluster
+            case 2 -> new int[]{24, 8};   // only monster hoards
+            default -> new int[]{12, 4};  // big
+        };
+    }
+
+    public String stashLabel() {
+        return switch (stashLevel) {
+            case 0 -> "Any (6c/2s)";
+            case 2 -> "Huge (24c/8s)";
+            default -> "Big (12c/4s)";
+        };
+    }
+
+    public void cycleStashLevel() {
+        stashLevel = (stashLevel + 1) % 3;
+        save();
+    }
+
+    public void cycleStashPause() {
+        stashPause = !stashPause;
+        save();
+    }
+
+    public String stashPauseLabel() {
+        return stashPause ? "On (stop at stash)" : "Off (keep scouting)";
+    }
+
     // skip ALL bases — don't auto-navigate to any; just pin them, you go yourself
     public boolean skipBases = true;
     // (when NOT skipping all) skip raided/ruined ones — only go for looted-worthy
@@ -210,6 +258,9 @@ public final class CycleaConfig {
                 oreSeekLevel = Integer.parseInt(p.getProperty("oreSeekLevel", "1"));
                 oneByOne = Boolean.parseBoolean(p.getProperty("oneByOne", "false"));
                 paceLevel = Integer.parseInt(p.getProperty("paceLevel", "1"));
+                mode = Integer.parseInt(p.getProperty("mode", "0"));
+                stashLevel = Integer.parseInt(p.getProperty("stashLevel", "1"));
+                stashPause = Boolean.parseBoolean(p.getProperty("stashPause", "false"));
                 skipBases = Boolean.parseBoolean(p.getProperty("skipBases", "true"));
                 skipRaided = Boolean.parseBoolean(p.getProperty("skipRaided", "true"));
             }
@@ -227,6 +278,9 @@ public final class CycleaConfig {
         p.setProperty("oreSeekLevel", Integer.toString(oreSeekLevel));
         p.setProperty("oneByOne", Boolean.toString(oneByOne));
         p.setProperty("paceLevel", Integer.toString(paceLevel));
+        p.setProperty("mode", Integer.toString(mode));
+        p.setProperty("stashLevel", Integer.toString(stashLevel));
+        p.setProperty("stashPause", Boolean.toString(stashPause));
         p.setProperty("skipBases", Boolean.toString(skipBases));
         p.setProperty("skipRaided", Boolean.toString(skipRaided));
         try (OutputStream out = Files.newOutputStream(file())) {
