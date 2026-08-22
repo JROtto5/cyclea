@@ -115,6 +115,15 @@ public final class TargetScanner {
             }
         }
 
+        // storage minecarts & chest boats are strong "active base" signals too
+        for (Entity e : level.entitiesForRendering()) {
+            if (e instanceof net.minecraft.world.entity.vehicle.minecart.AbstractMinecartContainer
+                || e instanceof net.minecraft.world.entity.vehicle.boat.AbstractChestBoat) {
+                chestsTotal++;
+                containers.add(new ContainerHit(e.blockPosition(), false, false, null));
+            }
+        }
+
         List<Base> bases = detectBases(containers, 12, 3);
 
         int[] entities = countEntities(mc, level);

@@ -83,6 +83,19 @@ public final class Autopilot {
     private long sessionStart = 0;
     private double lastX = Double.NaN;
     private double lastZ = Double.NaN;
+    private int oresMined = 0;            // ores dug this run (for the ores/hr metric)
+    private BlockPos pendingOre = null;   // an ore we're breaking; counted when it turns to air
+    private double lastTorchDist = 0;     // auto-torch spacing (by distance travelled)
+
+    public int getOresMined() {
+        return oresMined;
+    }
+
+    /** Ores per hour this session (0 until we've mined something). */
+    public int getOresPerHour() {
+        long s = getSessionSeconds();
+        return s <= 0 ? 0 : (int) (oresMined * 3600L / s);
+    }
 
     // human-intervention metrics
     private int takeovers = 0;
@@ -292,6 +305,7 @@ public final class Autopilot {
         stashScanTick = 0;
         surfDetourTicks = 0;
         alertedStashes.clear();
+        pendingOre = null;
         jumpTicks = 0;
         botYaw = Float.NaN;
         manualPauseTicks = 0;
@@ -814,6 +828,12 @@ public final class Autopilot {
             mineTicks = 0;
         }
 
+        // count ores as they finish breaking (ores/hr metric)
+        if (pendingOre != null && mc.level.getBlockState(pendingOre).isAir()) {
+            oresMined++;
+            pendingOre = null;
+        }
+
         // TOP PRIORITY: clear anything that fell/exists in our own head or feet
         // (gravel & sand avalanche as we dig) so we never suffocate or jam.
         if (mineHere(mc, feet.above())) {
@@ -831,6 +851,9 @@ public final class Autopilot {
 
         // grab any ore exposed right next to us first
         BlockPos target = adjacentOre(mc, feet);
+        if (target != null) {
+            pendingOre = target;   // it's a wanted ore — count it once it breaks
+        }
 
         // if we've sunk below the target depth (e.g. wedged at Y-60 in the bedrock
         // layer), climb back up to Y-59 — mine the block above head and hop up.
@@ -903,6 +926,12 @@ public final class Autopilot {
                     return;   // placed a bridge block
                 }
                 stop(mc, "§edrop ahead, no blocks to bridge — need you");
+                return;
+            }
+            // auto-torch: drop a torch every ~12 blocks so worked tunnels stay lit and
+            // mobs don't spawn behind us. No-op if there are no torches in the hotbar.
+            if (blocksTraveled - lastTorchDist > 12 && place(mc, feet, "torch")) {
+                lastTorchDist = blocksTraveled;
                 return;
             }
             // walk (no sprint — sprinting runs into blocks it hasn't broken yet and
