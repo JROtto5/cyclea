@@ -93,9 +93,19 @@ public class CycleaClient implements ClientModInitializer {
         return KeyMappingHelper.registerKeyMapping(new KeyMapping(id, key, CATEGORY));
     }
 
+    private boolean announcedReady = false;
+
     private void onTick(Minecraft mc) {
         if (mc.player == null) {
+            announcedReady = false;   // re-arm for the next world join
             return;
+        }
+        // one-time startup self-check per world: confirm we loaded and whether Xaero is here
+        if (!announcedReady) {
+            announcedReady = true;
+            boolean xaero = MinimapBridge.available();
+            say(mc, "§b[Cyclea] ready §7— minimap: " + (xaero ? "§aXaero ✓" : "§estandalone")
+                + " §7· O=auto, M=mode, J=config");
         }
         CycleaState st = CycleaState.get();
 
