@@ -92,6 +92,12 @@ public class CycleaConfigScreen extends Screen {
         }).bounds(x, y, w, h).build());
         y += 26;
 
+        addRenderableWidget(Button.builder(autoSellMsg(), b -> {
+            c.cycleAutoSell();
+            b.setMessage(autoSellMsg());
+        }).bounds(x, y, w, h).build());
+        y += 26;
+
         addRenderableWidget(Button.builder(skipRaidedMsg(), b -> {
             c.cycleSkipRaided();
             b.setMessage(skipRaidedMsg());
@@ -150,6 +156,10 @@ public class CycleaConfigScreen extends Screen {
 
     private Component skipBasesMsg() {
         return Component.literal("Skip all bases: " + CycleaConfig.get().skipBasesLabel());
+    }
+
+    private Component autoSellMsg() {
+        return Component.literal("Auto-sell when full: " + CycleaConfig.get().autoSellLabel());
     }
 
     private Component skipRaidedMsg() {

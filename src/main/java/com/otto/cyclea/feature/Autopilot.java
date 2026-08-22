@@ -326,6 +326,7 @@ public final class Autopilot {
         surfDetourTicks = 0;
         alertedStashes.clear();
         pendingOre = null;
+        sellCd = 0;
         jumpTicks = 0;
         botYaw = Float.NaN;
         manualPauseTicks = 0;
@@ -586,12 +587,21 @@ public final class Autopilot {
         }
         pillarSpot = null;   // at/above target depth — no pillar pending
 
-        // 1c) inventory full — don't just stop and wait for you. Toss junk (cobble/dirt/
-        //     gravel/etc.) to make room and keep mining. Only stop if it's full of stuff
-        //     actually worth keeping.
+        // 1c) inventory full — never just stop. First cash out with the server sell
+        //     command (/sell all), then dump bulk cobbled-deepslate/junk (keeping a
+        //     building stock), and keep mining. Only stop if truly full of keepers.
+        if (sellCd > 0) {
+            sellCd--;
+        }
         if (player.getInventory().getFreeSlot() < 0) {
-            if (dropJunk(mc)) {
-                return;   // freed a slot this tick — carry on next tick
+            if (CycleaConfig.get().autoSell && sellCd == 0) {
+                mc.player.connection.sendCommand(CycleaConfig.get().sellCommand.replaceFirst("^/", ""));
+                say(mc, "§e/" + CycleaConfig.get().sellCommand + " §7— cashing out a full inventory");
+                sellCd = 60;   // ~3s before we try again
+                return;
+            }
+            if (dumpBulk(mc)) {
+                return;   // freed a slot this tick — carry on
             }
             stop(mc, "§einventory full of keepers — empty me (into a shulker), then press O");
             return;
@@ -993,12 +1003,20 @@ public final class Autopilot {
                 lastTorchDist = blocksTraveled;
                 return;
             }
-            // walk (no sprint — sprinting runs into blocks it hasn't broken yet and
-            // spams the server). Only move when the next 2 blocks are genuinely clear.
+            // walk when the next 2 blocks are clear; SPRINT when a longer runway is open
+            // (an existing tunnel/corridor) so travelling underground is fast — but never
+            // sprint into blocks we still have to break (that spams the server).
             boolean facing = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 25f;
             boolean clearAhead = passable(mc, aheadFeet) && passable(mc, aheadHead);
+            BlockPos a2 = feet.relative(dir, 2);
+            BlockPos a3 = feet.relative(dir, 3);
+            boolean runway = clearAhead
+                && !hazard(mc, aheadFeet) && !hazard(mc, aheadHead)
+                && passable(mc, a2) && passable(mc, a2.above()) && !hazard(mc, a2)
+                && passable(mc, a3) && passable(mc, a3.above()) && !hazard(mc, a3)
+                && !passable(mc, aheadFeet.below()) && !hazard(mc, aheadFeet.below());
             key(mc, mc.options.keyUp, facing && clearAhead);
-            key(mc, mc.options.keySprint, false);
+            key(mc, mc.options.keySprint, facing && runway);
         }
     }
 
@@ -1171,9 +1189,17 @@ public final class Autopilot {
             return false;   // something's already there
         }
         Inventory inv = mc.player.getInventory();
-        int slot = findHotbar(inv, s -> suffix.isEmpty()
-            ? s.getItem() instanceof BlockItem
-            : BuiltInRegistries.ITEM.getKey(s.getItem()).getPath().endsWith(suffix));
+        int slot;
+        if (suffix.isEmpty()) {
+            // build with the cheap stone we mine (cobbled deepslate/cobble/junk) first,
+            // so we never waste a valuable block bridging or pillaring
+            slot = findHotbar(inv, s -> s.getItem() instanceof BlockItem && JUNK.contains(itemPath(s)));
+            if (slot < 0) {
+                slot = findHotbar(inv, s -> s.getItem() instanceof BlockItem);
+            }
+        } else {
+            slot = findHotbar(inv, s -> itemPath(s).endsWith(suffix));
+        }
         if (slot < 0) {
             return false;   // no matching block/trapdoor in hotbar
         }
@@ -1244,18 +1270,67 @@ public final class Autopilot {
         "clay", "coarse_dirt", "mud", "magma_block", "soul_sand", "soul_soil",
         "grass_block", "mossy_cobblestone", "infested_stone", "infested_deepslate");
 
+    /** Building blocks we keep a stock of (from mining) to bridge/pillar/wall with. */
+    private static final java.util.Set<String> BUILD = java.util.Set.of("cobbled_deepslate", "cobblestone");
+    private int sellCd = 0;
+
+    private static String itemPath(ItemStack s) {
+        return BuiltInRegistries.ITEM.getKey(s.getItem()).getPath();
+    }
+
+    /** Throw the whole stack in inventory slot {@code i} out onto the ground. */
+    private void throwSlot(Minecraft mc, int i) {
+        int menuSlot = (i < 9) ? i + 36 : i;           // player menu: hotbar 36-44, main 9-35
+        mc.gameMode.handleContainerInput(mc.player.inventoryMenu.containerId, menuSlot, 1,
+            net.minecraft.world.inventory.ContainerInput.THROW, mc.player);
+    }
+
     /** Toss one junk stack (from anywhere in the inventory) to free a slot. True if it did. */
     private boolean dropJunk(Minecraft mc) {
         Inventory inv = mc.player.getInventory();
-        for (int i = 0; i < 36; i++) {                 // 0-8 hotbar, 9-35 main
+        for (int i = 0; i < 36; i++) {
             ItemStack s = inv.getItem(i);
-            if (s.isEmpty()
-                || !JUNK.contains(BuiltInRegistries.ITEM.getKey(s.getItem()).getPath())) {
+            if (!s.isEmpty() && JUNK.contains(itemPath(s))) {
+                throwSlot(mc, i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Dump bulk mined stone to free a slot — cobbled deepslate first (the user's ask),
+     *  then any other junk — but always keep ONE building stack for bridging/pillaring. */
+    private boolean dumpBulk(Minecraft mc) {
+        Inventory inv = mc.player.getInventory();
+        int buildStacks = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = inv.getItem(i);
+            if (!s.isEmpty() && BUILD.contains(itemPath(s))) {
+                buildStacks++;
+            }
+        }
+        // pass 1: cobbled deepslate specifically (keep the last building stack)
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = inv.getItem(i);
+            if (!s.isEmpty() && itemPath(s).equals("cobbled_deepslate") && buildStacks > 1) {
+                throwSlot(mc, i);
+                return true;
+            }
+        }
+        // pass 2: any other junk (never the last building stack)
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = inv.getItem(i);
+            if (s.isEmpty()) {
                 continue;
             }
-            int menuSlot = (i < 9) ? i + 36 : i;       // player menu: hotbar is 36-44, main 9-35
-            mc.gameMode.handleContainerInput(mc.player.inventoryMenu.containerId, menuSlot, 1,
-                net.minecraft.world.inventory.ContainerInput.THROW, mc.player);
+            String p = itemPath(s);
+            if (!JUNK.contains(p)) {
+                continue;
+            }
+            if (BUILD.contains(p) && buildStacks <= 1) {
+                continue;   // keep one stack of building material
+            }
+            throwSlot(mc, i);
             return true;
         }
         return false;

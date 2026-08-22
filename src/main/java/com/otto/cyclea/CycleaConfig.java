@@ -124,6 +124,19 @@ public final class CycleaConfig {
         return stashPause ? "On (stop at stash)" : "Off (keep scouting)";
     }
 
+    // when full, run a server sell command (e.g. /sell all) to cash out valuables
+    public boolean autoSell = true;
+    public String sellCommand = "sell all";   // sent WITHOUT the leading slash
+
+    public void cycleAutoSell() {
+        autoSell = !autoSell;
+        save();
+    }
+
+    public String autoSellLabel() {
+        return autoSell ? "On (/" + sellCommand + ")" : "Off";
+    }
+
     // skip ALL bases — don't auto-navigate to any; just pin them, you go yourself
     public boolean skipBases = true;
     // (when NOT skipping all) skip raided/ruined ones — only go for looted-worthy
@@ -299,6 +312,8 @@ public final class CycleaConfig {
                 oreSeekLevel = Integer.parseInt(p.getProperty("oreSeekLevel", "1"));
                 oneByOne = Boolean.parseBoolean(p.getProperty("oneByOne", "false"));
                 paceLevel = Integer.parseInt(p.getProperty("paceLevel", "1"));
+                autoSell = Boolean.parseBoolean(p.getProperty("autoSell", "true"));
+                sellCommand = p.getProperty("sellCommand", "sell all");
                 mode = Integer.parseInt(p.getProperty("mode", "0"));
                 stashLevel = Integer.parseInt(p.getProperty("stashLevel", "1"));
                 stashPause = Boolean.parseBoolean(p.getProperty("stashPause", "false"));
@@ -319,6 +334,8 @@ public final class CycleaConfig {
         p.setProperty("oreSeekLevel", Integer.toString(oreSeekLevel));
         p.setProperty("oneByOne", Boolean.toString(oneByOne));
         p.setProperty("paceLevel", Integer.toString(paceLevel));
+        p.setProperty("autoSell", Boolean.toString(autoSell));
+        p.setProperty("sellCommand", sellCommand);
         p.setProperty("mode", Integer.toString(mode));
         p.setProperty("stashLevel", Integer.toString(stashLevel));
         p.setProperty("stashPause", Boolean.toString(stashPause));
