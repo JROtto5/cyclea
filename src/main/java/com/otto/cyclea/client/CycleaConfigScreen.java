@@ -56,14 +56,13 @@ public class CycleaConfigScreen extends Screen {
         addRow(oreEspMsg(), b -> { c.cycleOreEsp(); b.setMessage(oreEspMsg()); });
         addRow(tracersMsg(), b -> { c.cycleTracers(); b.setMessage(tracersMsg()); });
         addRow(watchmanMsg(), b -> { c.cycleWatchman(); b.setMessage(watchmanMsg()); });
-        addRow(stashPauseMsg(), b -> { c.cycleStashPause(); b.setMessage(stashPauseMsg()); });
         addRow(turnMsg(), b -> { c.cycleTurn(); b.setMessage(turnMsg()); });
         addRow(glanceMsg(), b -> { c.cycleGlance(); b.setMessage(glanceMsg()); });
         addRow(sweepMsg(), b -> { c.cycleSweepStep(); b.setMessage(sweepMsg()); });
         addRow(oreMsg(), b -> { c.cycleOreSeek(); b.setMessage(oreMsg()); });
         addRow(oneByOneMsg(), b -> { c.cycleOneByOne(); b.setMessage(oneByOneMsg()); });
         addRow(paceMsg(), b -> { c.cyclePace(); b.setMessage(paceMsg()); });
-        addRow(skipBasesMsg(), b -> { c.cycleSkipBases(); b.setMessage(skipBasesMsg()); });
+        addRow(onFindMsg(), b -> { c.cycleOnFind(); b.setMessage(onFindMsg()); });
         addRow(autoSellMsg(), b -> { c.cycleAutoSell(); b.setMessage(autoSellMsg()); });
         addRow(skipRaidedMsg(), b -> { c.cycleSkipRaided(); b.setMessage(skipRaidedMsg()); });
         addRow(Component.literal("Clear base waypoints"), b -> {
@@ -132,10 +131,6 @@ public class CycleaConfigScreen extends Screen {
         return Component.literal("Watchman [G=seal]: " + CycleaConfig.get().watchmanLabel());
     }
 
-    private Component stashPauseMsg() {
-        return Component.literal("Pause at stash: " + CycleaConfig.get().stashPauseLabel());
-    }
-
     private Component turnMsg() {
         return Component.literal("Camera turn speed: " + CycleaConfig.get().turnLabel());
     }
@@ -160,8 +155,8 @@ public class CycleaConfigScreen extends Screen {
         return Component.literal("Speed / server pace: " + CycleaConfig.get().paceLabel());
     }
 
-    private Component skipBasesMsg() {
-        return Component.literal("Skip all bases: " + CycleaConfig.get().skipBasesLabel());
+    private Component onFindMsg() {
+        return Component.literal("On find (base/stash): " + CycleaConfig.get().onFindLabel());
     }
 
     private Component autoSellMsg() {
@@ -169,7 +164,7 @@ public class CycleaConfigScreen extends Screen {
     }
 
     private Component skipRaidedMsg() {
-        return Component.literal("Skip raided bases: " + CycleaConfig.get().skipRaidedLabel());
+        return Component.literal("Only worthwhile finds: " + CycleaConfig.get().skipRaidedLabel());
     }
 
     @Override

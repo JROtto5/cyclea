@@ -40,8 +40,24 @@ public final class CycleaConfig {
     public int mode = 0;
     // stash-alert sensitivity for surface mode: 0 = any, 1 = big (default), 2 = huge
     public int stashLevel = 1;
-    // pause the scout when a big stash is found (default: keep scouting, just alert)
-    public boolean stashPause = false;
+
+    // ONE unified "what to do on a find" for both modes (replaces the old separate
+    // skip-bases and pause-at-stash toggles): 0 = pin it and keep working (default),
+    // 1 = stop and hand it to you, 2 = navigate to it (miner only; scout stops).
+    public int onFindLevel = 0;
+
+    public void cycleOnFind() {
+        onFindLevel = (onFindLevel + 1) % 3;
+        save();
+    }
+
+    public String onFindLabel() {
+        return switch (onFindLevel) {
+            case 1 -> "Stop & hand to me";
+            case 2 -> "Go to it";
+            default -> "Pin it, keep working";
+        };
+    }
 
     // one-click preset bundles
     public static final String[] PRESETS = {"Diamond Run", "Surface Scout", "All-Ore Miner", "Cautious"};
@@ -53,26 +69,26 @@ public final class CycleaConfig {
             case 1 -> {                       // Surface Scout
                 mode = 1;
                 stashLevel = 1;
-                stashPause = false;
+                onFindLevel = 0;
             }
             case 2 -> {                       // All-Ore Miner
                 mode = 0;
                 oreSeekLevel = 3;
                 paceLevel = 1;
-                skipBases = true;
+                onFindLevel = 0;
             }
             case 3 -> {                       // Cautious (slow, safe, XP ores)
                 mode = 0;
                 oreSeekLevel = 1;
                 paceLevel = 2;
-                skipBases = true;
+                onFindLevel = 0;
                 skipRaided = true;
             }
             default -> {                      // Diamond Run
                 mode = 0;
                 oreSeekLevel = 1;
                 paceLevel = 1;
-                skipBases = true;
+                onFindLevel = 0;
                 skipRaided = true;
                 oneByOne = false;
             }
@@ -113,15 +129,6 @@ public final class CycleaConfig {
     public void cycleStashLevel() {
         stashLevel = (stashLevel + 1) % 3;
         save();
-    }
-
-    public void cycleStashPause() {
-        stashPause = !stashPause;
-        save();
-    }
-
-    public String stashPauseLabel() {
-        return stashPause ? "On (stop at stash)" : "Off (keep scouting)";
     }
 
     // Watchman: warn when another player comes within range while you're underground
@@ -173,19 +180,8 @@ public final class CycleaConfig {
         return autoSell ? "On (/" + sellCommand + ")" : "Off";
     }
 
-    // skip ALL bases — don't auto-navigate to any; just pin them, you go yourself
-    public boolean skipBases = true;
-    // (when NOT skipping all) skip raided/ruined ones — only go for looted-worthy
+    // quality filter: only treat looted-worthy finds as worth stopping/going for
     public boolean skipRaided = true;
-
-    public void cycleSkipBases() {
-        skipBases = !skipBases;
-        save();
-    }
-
-    public String skipBasesLabel() {
-        return skipBases ? "On (just pin, I'll go)" : "Off (auto-navigate)";
-    }
 
     public void cycleSkipRaided() {
         skipRaided = !skipRaided;
@@ -358,8 +354,7 @@ public final class CycleaConfig {
                 }
                 mode = Integer.parseInt(p.getProperty("mode", "0"));
                 stashLevel = Integer.parseInt(p.getProperty("stashLevel", "1"));
-                stashPause = Boolean.parseBoolean(p.getProperty("stashPause", "false"));
-                skipBases = Boolean.parseBoolean(p.getProperty("skipBases", "true"));
+                onFindLevel = Integer.parseInt(p.getProperty("onFind", "0"));
                 skipRaided = Boolean.parseBoolean(p.getProperty("skipRaided", "true"));
             }
         } catch (Exception ignored) {
@@ -383,8 +378,7 @@ public final class CycleaConfig {
         p.setProperty("sellCommand", sellCommand);
         p.setProperty("mode", Integer.toString(mode));
         p.setProperty("stashLevel", Integer.toString(stashLevel));
-        p.setProperty("stashPause", Boolean.toString(stashPause));
-        p.setProperty("skipBases", Boolean.toString(skipBases));
+        p.setProperty("onFind", Integer.toString(onFindLevel));
         p.setProperty("skipRaided", Boolean.toString(skipRaided));
         try (OutputStream out = Files.newOutputStream(file())) {
             p.store(out, "Cyclea config");

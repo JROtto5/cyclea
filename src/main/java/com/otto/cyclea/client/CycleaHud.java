@@ -229,27 +229,31 @@ public class CycleaHud implements HudElement {
             }
         }
 
-        // travel route: a green polyline through the A* path (or a line to the target)
+        // travel route: a green polyline laid ON THE FLOOR, tracing the tunnels the path
+        // runs through (and rising with it up stairs). Starts at the player's feet.
         if (tracers && mc.player != null) {
             List<net.minecraft.core.BlockPos> path = Autopilot.get().getPath();
-            int prevX = ox;
-            int prevY = oy;
+            int[] start = p.to(mc.player.getX(), mc.player.getY() + 0.1, mc.player.getZ());
+            int prevX = start != null ? start[0] : ox;
+            int prevY = start != null ? start[1] : oy;
             boolean any = false;
             for (net.minecraft.core.BlockPos n : path) {
-                int[] sp = p.to(n.getX() + 0.5, n.getY() + 0.5, n.getZ() + 0.5);
+                int[] sp = p.to(n.getX() + 0.5, n.getY() + 0.1, n.getZ() + 0.5);   // floor level
                 if (sp == null) {
                     continue;
                 }
-                line(g, prevX, prevY, sp[0], sp[1], 0x9930FF60);
+                line(g, prevX, prevY, sp[0], sp[1], 0xBB33FF66);
+                g.fill(sp[0] - 1, sp[1] - 1, sp[0] + 2, sp[1] + 2, 0xCC33FF66);   // node dot
                 prevX = sp[0];
                 prevY = sp[1];
                 any = true;
             }
             if (!any && Autopilot.get().isActive()) {
-                int[] sp = p.to(Autopilot.get().getTargetX() + 0.5, mc.player.getY(),
+                // no A* path (just sweeping) — lay a floor line to the current heading
+                int[] sp = p.to(Autopilot.get().getTargetX() + 0.5, mc.player.getY() + 0.1,
                     Autopilot.get().getTargetZ() + 0.5);
-                if (sp != null) {
-                    line(g, ox, oy, sp[0], sp[1], 0x9930FF60);
+                if (sp != null && start != null) {
+                    line(g, start[0], start[1], sp[0], sp[1], 0xBB33FF66);
                 }
             }
         }

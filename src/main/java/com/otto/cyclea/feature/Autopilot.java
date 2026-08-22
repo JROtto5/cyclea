@@ -699,21 +699,34 @@ public final class Autopilot {
             TargetScanner.Scan scan = TargetScanner.scan(mc);
             // always pin every base to the map so you can find them yourself
             int pinned = MinimapBridge.pushBases(scan.bases());
-            java.util.List<TargetScanner.Base> worthGoing = new java.util.ArrayList<>();
-            // "Skip all bases" (default on): don't auto-navigate — just pin and keep sweeping
-            if (!CycleaConfig.get().skipBases) {
-                for (TargetScanner.Base b : scan.bases()) {
-                    if (!CycleaConfig.get().skipRaided || !b.status().equals("RAIDED")) {
-                        worthGoing.add(b);
-                    }
+            // worthwhile = passes the "only looted-worthy" filter
+            java.util.List<TargetScanner.Base> worth = new java.util.ArrayList<>();
+            for (TargetScanner.Base b : scan.bases()) {
+                if (!CycleaConfig.get().skipRaided || !b.status().equals("RAIDED")) {
+                    worth.add(b);
                 }
-            } else if (pinned > 0) {
-                say(mc, "§b⚑ " + pinned + " base" + (pinned == 1 ? "" : "s")
-                    + " pinned to map §7(skip-all-bases on — I'll keep mining, you go check them)");
             }
-            if (!worthGoing.isEmpty()) {
-                TargetScanner.Base best = richest(worthGoing);
-                // A* a real route to the base; fall back to dig-toward if none found
+            int onFind = CycleaConfig.get().onFindLevel;
+            if (onFind == 0) {
+                // pin & keep working (default)
+                if (pinned > 0) {
+                    say(mc, "§b⚑ " + pinned + " base" + (pinned == 1 ? "" : "s")
+                        + " pinned to map §7— I'll keep mining, you go check them");
+                }
+            } else if (!worth.isEmpty()) {
+                TargetScanner.Base best = richest(worth);
+                mc.player.playSound(net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 1.4f);
+                say(mc, "§a★ BASE FOUND §f" + best.chests() + " chests, " + best.shulkers()
+                    + " shulkers §7at §f" + best.center().getX() + "," + best.center().getY()
+                    + "," + best.center().getZ() + " §7— " + lootRating(best));
+                if (!best.loot().isEmpty()) {
+                    say(mc, "§7   loot: §f" + best.loot());
+                }
+                if (onFind == 1) {
+                    stop(mc, "§a★ base found — your turn (press O to resume)");
+                    return;
+                }
+                // onFind == 2: navigate — A* a real route, fall back to dig-toward
                 path = Pathfinder.find(mc, mc.player.blockPosition(), best.center());
                 pathIndex = 0;
                 if (path != null && !path.isEmpty()) {
@@ -725,15 +738,8 @@ public final class Autopilot {
                 }
                 approaching = true;
                 newLeg(mc);
-                mc.player.playSound(net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 1.4f);
-                say(mc, "§a★ BASE FOUND §f" + best.chests() + " chests, " + best.shulkers()
-                    + " shulkers §7at §f" + best.center().getX() + "," + best.center().getY()
-                    + "," + best.center().getZ() + " §7— " + lootRating(best)
-                    + (path != null ? " §e→ pathing there (" + path.size() + " steps)…"
-                        : " §e→ heading there…"));
-                if (!best.loot().isEmpty()) {
-                    say(mc, "§7   loot: §f" + best.loot());
-                }
+                say(mc, path != null ? "§e→ pathing there (" + path.size() + " steps)…"
+                    : "§e→ heading there…");
             }
         }
 
@@ -1768,7 +1774,7 @@ public final class Autopilot {
             if (!b.loot().isEmpty()) {
                 say(mc, "§7   loot: §f" + b.loot());
             }
-            if (CycleaConfig.get().stashPause) {
+            if (CycleaConfig.get().onFindLevel >= 1) {
                 stop(mc, "§6big stash found — dig down, or press O to keep scouting");
                 return;
             }
