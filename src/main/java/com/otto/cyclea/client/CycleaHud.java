@@ -1,12 +1,15 @@
 package com.otto.cyclea.client;
 
+import com.otto.cyclea.CycleaConfig;
 import com.otto.cyclea.CycleaState;
 import com.otto.cyclea.feature.Autopilot;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
+import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
 
@@ -22,6 +25,11 @@ public class CycleaHud implements HudElement {
     public void extractRenderState(GuiGraphicsExtractor g, DeltaTracker delta) {
         Minecraft mc = Minecraft.getInstance();
         CycleaState s = CycleaState.get();
+        // see-through ore ESP draws whenever ores are being scanned (search OR auto on),
+        // independent of the base-finder panel below
+        if (mc.player != null && CycleaConfig.get().oreEsp) {
+            drawOreEsp(g, mc, s);
+        }
         if (!s.isActive() || mc.player == null) {
             return;
         }
@@ -92,15 +100,87 @@ public class CycleaHud implements HudElement {
             py = Math.max(cy - r, Math.min(cy + r - 2, py));
             g.fill(px, py, px + 2, py + 2, color);
         }
-        // ore X-ray: selected ores nearby, color-coded (shown through walls)
-        for (int[] o : s.getOreBlips()) {
-            int px = cx + (int) Math.round(o[0] * scale);
-            int py = cy + (int) Math.round(o[1] * scale);
+        // ore X-ray: selected ores nearby, color-coded (top-down, through walls)
+        Minecraft mc = Minecraft.getInstance();
+        double px0 = mc.player.getX();
+        double pz0 = mc.player.getZ();
+        for (int[] o : s.getOreBlips()) {          // {x, y, z, rgb} absolute
+            int px = cx + (int) Math.round((o[0] + 0.5 - px0) * scale);
+            int py = cy + (int) Math.round((o[2] + 0.5 - pz0) * scale);
             px = Math.max(cx - r, Math.min(cx + r - 1, px));
             py = Math.max(cy - r, Math.min(cy + r - 1, py));
-            g.fill(px, py, px + 1, py + 1, 0xFF000000 | o[2]);
+            g.fill(px, py, px + 1, py + 1, 0xFF000000 | o[3]);
         }
         g.fill(cx - 1, cy - 1, cx + 2, cy + 2, 0xFFFFFFFF); // player
+    }
+
+    /**
+     * See-through ore overlay: project each nearby selected ore's world position onto the
+     * screen (manual camera projection in GUI space) and draw a colored box outline there —
+     * an ESP that shows ores through walls, without needing a world-render hook.
+     */
+    private void drawOreEsp(GuiGraphicsExtractor g, Minecraft mc, CycleaState s) {
+        List<int[]> ores = s.getOreBlips();
+        if (ores.isEmpty()) {
+            return;
+        }
+        Camera cam = mc.gameRenderer.mainCamera();
+        if (cam == null || !cam.isInitialized()) {
+            return;
+        }
+        Vec3 cp = cam.position();
+        double yaw = Math.toRadians(cam.yRot());
+        double pitch = Math.toRadians(cam.xRot());
+        double cyaw = Math.cos(yaw);
+        double syaw = Math.sin(yaw);
+        double cpit = Math.cos(pitch);
+        double spit = Math.sin(pitch);
+        // forward, right, up basis (Minecraft convention)
+        double fX = -syaw * cpit;
+        double fY = -spit;
+        double fZ = cyaw * cpit;
+        double rLen = Math.sqrt(fZ * fZ + fX * fX);
+        if (rLen < 1e-4) {
+            return;
+        }
+        double rX = -fZ / rLen;
+        double rZ = fX / rLen;
+        double uX = -rZ * fY;
+        double uY = rZ * fX - rX * fZ;
+        double uZ = rX * fY;
+
+        int gw = g.guiWidth();
+        int gh = g.guiHeight();
+        double fov = Math.toRadians(Math.max(30, cam.getFov()));
+        double f = (gh / 2.0) / Math.tan(fov / 2.0);
+
+        int drawn = 0;
+        for (int[] o : ores) {
+            double relX = o[0] + 0.5 - cp.x;
+            double relY = o[1] + 0.5 - cp.y;
+            double relZ = o[2] + 0.5 - cp.z;
+            double camFwd = relX * fX + relY * fY + relZ * fZ;
+            if (camFwd < 0.4) {
+                continue;   // behind us
+            }
+            double camRight = relX * rX + relZ * rZ;
+            double camUp = relX * uX + relY * uY + relZ * uZ;
+            int sx = (int) Math.round(gw / 2.0 + (camRight / camFwd) * f);
+            int sy = (int) Math.round(gh / 2.0 - (camUp / camFwd) * f);
+            if (sx < -20 || sx > gw + 20 || sy < -20 || sy > gh + 20) {
+                continue;
+            }
+            int half = (int) Math.max(2, Math.min(26, (0.85 / camFwd) * f));
+            int col = 0xFF000000 | o[3];
+            // box outline (4 thin edges)
+            g.fill(sx - half, sy - half, sx + half, sy - half + 1, col);   // top
+            g.fill(sx - half, sy + half - 1, sx + half, sy + half, col);   // bottom
+            g.fill(sx - half, sy - half, sx - half + 1, sy + half, col);   // left
+            g.fill(sx + half - 1, sy - half, sx + half, sy + half, col);   // right
+            if (++drawn >= 120) {
+                break;
+            }
+        }
     }
 
     private static String proximity(CycleaState s) {

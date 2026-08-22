@@ -44,6 +44,12 @@ public class CycleaConfigScreen extends Screen {
         }).bounds(x, y, w, h).build());
         y += 26;
 
+        addRenderableWidget(Button.builder(oreEspMsg(), b -> {
+            c.cycleOreEsp();
+            b.setMessage(oreEspMsg());
+        }).bounds(x, y, w, h).build());
+        y += 26;
+
         addRenderableWidget(Button.builder(stashPauseMsg(), b -> {
             c.cycleStashPause();
             b.setMessage(stashPauseMsg());
@@ -124,6 +130,10 @@ public class CycleaConfigScreen extends Screen {
 
     private Component stashMsg() {
         return Component.literal("Stash alert size: " + CycleaConfig.get().stashLabel());
+    }
+
+    private Component oreEspMsg() {
+        return Component.literal("Ore X-ray overlay: " + CycleaConfig.get().oreEspLabel());
     }
 
     private Component stashPauseMsg() {

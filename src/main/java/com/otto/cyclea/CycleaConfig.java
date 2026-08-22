@@ -124,6 +124,18 @@ public final class CycleaConfig {
         return stashPause ? "On (stop at stash)" : "Off (keep scouting)";
     }
 
+    // draw see-through ore outlines projected onto the screen (ESP overlay)
+    public boolean oreEsp = true;
+
+    public void cycleOreEsp() {
+        oreEsp = !oreEsp;
+        save();
+    }
+
+    public String oreEspLabel() {
+        return oreEsp ? "On (see-through boxes)" : "Off (radar only)";
+    }
+
     // when full, run a server sell command (e.g. /sell all) to cash out valuables
     public boolean autoSell = true;
     public String sellCommand = "sell";   // opens the server's sell GUI (sent WITHOUT the slash)
@@ -312,6 +324,7 @@ public final class CycleaConfig {
                 oreSeekLevel = Integer.parseInt(p.getProperty("oreSeekLevel", "1"));
                 oneByOne = Boolean.parseBoolean(p.getProperty("oneByOne", "false"));
                 paceLevel = Integer.parseInt(p.getProperty("paceLevel", "1"));
+                oreEsp = Boolean.parseBoolean(p.getProperty("oreEsp", "true"));
                 autoSell = Boolean.parseBoolean(p.getProperty("autoSell", "true"));
                 sellCommand = p.getProperty("sellCommand", "sell");
                 if (sellCommand.equals("sell all")) {
@@ -337,6 +350,7 @@ public final class CycleaConfig {
         p.setProperty("oreSeekLevel", Integer.toString(oreSeekLevel));
         p.setProperty("oneByOne", Boolean.toString(oneByOne));
         p.setProperty("paceLevel", Integer.toString(paceLevel));
+        p.setProperty("oreEsp", Boolean.toString(oreEsp));
         p.setProperty("autoSell", Boolean.toString(autoSell));
         p.setProperty("sellCommand", sellCommand);
         p.setProperty("mode", Integer.toString(mode));

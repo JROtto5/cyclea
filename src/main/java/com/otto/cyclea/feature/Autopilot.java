@@ -1007,13 +1007,30 @@ public final class Autopilot {
                 aim(player, travelYaw + glanceYaw, glancePitch);
             }
             if (passable(mc, aheadFeet.below()) && passable(mc, aheadFeet.below().below())) {
-                // gap/drop ahead — bridge it if we can...
+                boolean face = Math.abs(Mth.degreesDifference(player.getYRot(), travelYaw)) < 20f;
+                // FIRST: if there's solid footing 2-3 blocks across, sprint-JUMP the gap
+                // (faster and human) instead of bridging or turning around.
+                BlockPos l1 = feet.relative(dir, 2);
+                BlockPos l2 = feet.relative(dir, 3);
+                boolean l1ok = passable(mc, l1) && passable(mc, l1.above())
+                    && !passable(mc, l1.below()) && !hazard(mc, l1.below());
+                boolean l2ok = passable(mc, l2) && passable(mc, l2.above())
+                    && !passable(mc, l2.below()) && !hazard(mc, l2.below())
+                    && passable(mc, l1) && passable(mc, l1.above());
+                if (face && !hazard(mc, aheadFeet) && !hazard(mc, aheadHead) && (l1ok || l2ok)) {
+                    aim(player, travelYaw, 0f);
+                    key(mc, mc.options.keyUp, true);
+                    key(mc, mc.options.keySprint, true);
+                    key(mc, mc.options.keyJump, true);
+                    return;   // leaping the gap
+                }
+                // else bridge it if we can...
                 key(mc, mc.options.keyUp, false);
                 key(mc, mc.options.keySprint, false);
                 if (place(mc, aheadFeet.below(), "")) {
                     return;   // placed a bridge block
                 }
-                // ...no blocks: DON'T stop — turn away and head a different direction.
+                // ...no blocks and can't jump it: turn away and head a different direction.
                 startX = player.getX();
                 startZ = player.getZ();
                 axisX = !axisX;

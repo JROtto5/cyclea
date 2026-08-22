@@ -112,7 +112,8 @@ public final class TargetScanner {
                     if (!cfg.wantsOre(path)) {
                         continue;
                     }
-                    out.add(new int[]{dx, dz, oreColor(path)});
+                    // absolute block coords + colour, so the HUD can project them live
+                    out.add(new int[]{m.getX(), m.getY(), m.getZ(), oreColor(path)});
                     if (out.size() >= 250) {
                         return out;
                     }
