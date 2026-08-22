@@ -81,6 +81,7 @@ public final class Autopilot {
     private BlockPos pillarSpot = null;       // spot to fill mid-jump when climbing out of Y-60
     private int climbTicks = 0;               // how long we've been climbing out of a dip
     private Direction climbDir = null;        // fixed stair-up direction while climbing
+    private Boolean savedAutoJump = null;     // user's auto-jump setting, restored after a climb
     private int pillarTicks = 0;              // how long the current pillar-up has been running
     private int jumpTicks = 0;
     private double blocksTraveled = 0;    // session stats
@@ -370,6 +371,10 @@ public final class Autopilot {
     public void stop(Minecraft mc, String reason) {
         active = false;
         releaseAll(mc);
+        if (savedAutoJump != null) {
+            mc.options.autoJump().set(savedAutoJump);   // never leave auto-jump flipped
+            savedAutoJump = null;
+        }
         // log this as a hand-off to the human, categorized
         takeovers++;
         lastStopReason = stripCodes(reason);
@@ -665,8 +670,10 @@ public final class Autopilot {
         if (pillarSpot != null) {
             pillarTicks++;
             if (!mc.level.getBlockState(pillarSpot).isAir() || pillarTicks > 30) {
-                pillarSpot = null;   // block placed (or gave up) — pillar resolved
+                pillarSpot = null;      // block placed (or gave up) — pillar resolved
+                ensurePickaxe(mc);      // put the pick back in hand (place left cobble selected)
             } else {
+                key(mc, mc.options.keyAttack, false);   // NEVER punch while pillaring
                 place(mc, pillarSpot, "");   // fill the vacated cell while airborne
                 key(mc, mc.options.keyJump, true);
                 return;
@@ -677,20 +684,26 @@ public final class Autopilot {
             climbTicks++;
             key(mc, mc.options.keyUp, false);
             key(mc, mc.options.keySprint, false);
+            key(mc, mc.options.keyAttack, false);   // released unless a mine-branch re-holds it
+            // let vanilla auto-jump mount the steps for us (restored when the climb ends)
+            if (savedAutoJump == null) {
+                savedAutoJump = mc.options.autoJump().get();
+                mc.options.autoJump().set(Boolean.TRUE);
+            }
 
             // JUST STAIR UP. One fixed direction, one dumb reliable loop:
             // clear our own headroom → make sure there's a tread block ahead →
-            // clear the two blocks above it → sprint-jump onto it → repeat.
+            // clear the two blocks above it → walk into it (auto-jump climbs) → repeat.
             if (climbDir == null) {
                 climbDir = axisX
                     ? (targetX - player.getX() >= 0 ? Direction.EAST : Direction.WEST)
                     : (targetZ - player.getZ() >= 0 ? Direction.SOUTH : Direction.NORTH);
             }
 
-            // headroom above our own head (needed to jump)
+            // headroom above our own head (needed to step up)
             BlockPos head2 = feetC.above(2);
             if (canMine(mc, head2)) {
-                swingAt(mc, head2);
+                swingAt(mc, head2);   // swingAt selects the pick + holds attack itself
                 return;
             }
 
@@ -703,8 +716,9 @@ public final class Autopilot {
                 return;
             }
             if (passable(mc, tread)) {
-                // no step to stand on — build one from the cobble stock
+                // no step to stand on — build one from the cobble stock, then re-arm the pick
                 if (place(mc, tread, "")) {
+                    ensurePickaxe(mc);
                     return;
                 }
                 climbDir = climbDir.getClockWise();      // can't build here — turn
@@ -719,11 +733,11 @@ public final class Autopilot {
                 return;
             }
             if (passable(mc, c1) && passable(mc, c2)) {
-                // stair is ready — mount it
-                aim(player, climbDir.toYRot(), -5f);
+                // stair is ready — walk into it; auto-jump lifts us onto the tread
+                ensurePickaxe(mc);
+                aim(player, climbDir.toYRot(), 0f);
                 key(mc, mc.options.keyUp, true);
-                key(mc, mc.options.keySprint, true);
-                key(mc, mc.options.keyJump, true);
+                key(mc, mc.options.keyJump, true);       // belt & braces with auto-jump
                 return;
             }
             // stair blocked by unbreakable — turn; if we've spun a while, pillar out instead
@@ -738,6 +752,10 @@ public final class Autopilot {
         climbTicks = 0;
         climbDir = null;
         pillarSpot = null;   // at/above target depth — no pillar pending
+        if (savedAutoJump != null) {
+            mc.options.autoJump().set(savedAutoJump);    // climb over — restore your setting
+            savedAutoJump = null;
+        }
 
         // 1c) inventory full — never just stop. First cash out with the server sell
         //     command (/sell all), then dump bulk cobbled-deepslate/junk (keeping a
@@ -922,7 +940,16 @@ public final class Autopilot {
         // ore-seek: detour to dig out configured ores, but NEVER get stuck on one —
         // if it can't be reached in a few seconds, blacklist it and keep mining.
         if (oreGoal != null) {
-            if (++oreGoalTicks > 80) {                 // ~4s chasing one ore = give up
+            // FOCUS FORWARD: the moment an ore falls BEHIND our travel direction, let it
+            // go for good — no craning back at redstone we already passed.
+            double odx = oreGoal.getX() + 0.5 - player.getX();
+            double odz = oreGoal.getZ() + 0.5 - player.getZ();
+            double tdx = targetX - player.getX();
+            double tdz = targetZ - player.getZ();
+            if (odx * tdx + odz * tdz < 0 && odx * odx + odz * odz > 4) {
+                oreBlacklist.add(oreGoal.asLong());
+                oreGoal = null;
+            } else if (++oreGoalTicks > 80) {          // ~4s chasing one ore = give up
                 oreBlacklist.add(oreGoal.asLong());
                 if (oreBlacklist.size() > 128) {
                     oreBlacklist.clear();
@@ -2136,10 +2163,19 @@ public final class Autopilot {
     private BlockPos findWantedOre(Minecraft mc, BlockPos c, int r) {
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
+        double tdx = targetX - c.getX();   // travel heading — only take ores AHEAD of us
+        double tdz = targetZ - c.getZ();
         BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
         for (int dx = -r; dx <= r; dx++) {
-            for (int dy = -r; dy <= r; dy++) {
+            for (int dy = -3; dy <= 3; dy++) {   // never chase ores way above/below the lane
+                if (dy < -r || dy > r) {
+                    continue;
+                }
                 for (int dz = -r; dz <= r; dz++) {
+                    // skip anything behind the travel direction (unless it's right beside us)
+                    if (dx * tdx + dz * tdz < 0 && dx * dx + dz * dz > 4) {
+                        continue;
+                    }
                     m.set(c.getX() + dx, c.getY() + dy, c.getZ() + dz);
                     if (oreBlacklist.contains(m.asLong())) {
                         continue;   // gave up on this one already
