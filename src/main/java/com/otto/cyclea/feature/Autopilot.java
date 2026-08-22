@@ -428,6 +428,10 @@ public final class Autopilot {
         surfDetourTicks = 0;
         alertedStashes.clear();
         pendingOre = null;
+        farmTarget = null;
+        farmFar = null;
+        farmActCd = 0;
+        farmScanCd = 0;
         sellCd = 0;
         sellState = 0;
         sellWaitTicks = 0;
@@ -1768,6 +1772,47 @@ public final class Autopilot {
     private Direction farmDir = Direction.NORTH;
     private boolean farmSelling = false;
     private boolean farmGoingUp = true;   // patrol direction: up to the top, then back down
+    private BlockPos farmTarget = null;   // the cane we're committed to cutting
+    private int farmActCd = 0;            // harvest pacing (~5/sec)
+    private int farmScanCd = 0;           // throttle the wide cane scan
+    private BlockPos farmFar = null;      // cached far cane target
+
+    private boolean isCaneSegment(Minecraft mc, BlockPos pos) {
+        return mc.level.getBlockState(pos).is(Blocks.SUGAR_CANE)
+            && mc.level.getBlockState(pos.below()).is(Blocks.SUGAR_CANE);
+    }
+
+    /** Are we looking within {@code tol}° of point {@code t}? */
+    private boolean facing(net.minecraft.client.player.LocalPlayer p, Vec3 t, float tol) {
+        Vec3 eye = p.getEyePosition();
+        double d0 = t.x - eye.x;
+        double d1 = t.y - eye.y;
+        double d2 = t.z - eye.z;
+        double dxz = Math.sqrt(d0 * d0 + d2 * d2);
+        float wy = (float) (Math.toDegrees(Math.atan2(d2, d0)) - 90.0);
+        float wp = (float) (-Math.toDegrees(Math.atan2(d1, dxz)));
+        return Math.abs(Mth.degreesDifference(p.getYRot(), wy)) < tol
+            && Math.abs(p.getXRot() - wp) < tol;
+    }
+
+    private net.minecraft.world.entity.item.ItemEntity nearestCaneDrop(Minecraft mc, double r) {
+        net.minecraft.world.entity.item.ItemEntity best = null;
+        double bestD = r * r;
+        for (net.minecraft.world.entity.Entity e : mc.level.entitiesForRendering()) {
+            if (!(e instanceof net.minecraft.world.entity.item.ItemEntity ie)) {
+                continue;
+            }
+            if (!itemPath(ie.getItem()).equals("sugar_cane")) {
+                continue;
+            }
+            double d = mc.player.distanceToSqr(e);
+            if (d < bestD) {
+                bestD = d;
+                best = ie;
+            }
+        }
+        return best;
+    }
 
     /** One tick of sugarcane farming: sell a full pile, else harvest / walk / climb. */
     private void farmStep(Minecraft mc) {
@@ -1787,21 +1832,48 @@ public final class Autopilot {
             return;
         }
 
-        // harvest the nearest ready cane within reach (top segments only — leaves the base)
-        BlockPos cut = nearestHarvestCane(mc, 5, true);
-        if (cut != null) {
+        if (farmActCd > 0) {
+            farmActCd--;
+        }
+
+        // HARVEST like a player: commit to one cane, turn to it smoothly, then break it —
+        // and only once we're actually looking at it (so the break isn't rejected), paced
+        // to ~5/sec so it doesn't flood the server.
+        if (farmTarget != null && !isCaneSegment(mc, farmTarget)) {
+            farmTarget = null;   // already harvested/invalid
+        }
+        if (farmTarget == null && farmActCd <= 0) {
+            farmTarget = nearestHarvestCane(mc, 5, true);
+        }
+        if (farmTarget != null) {
             key(mc, mc.options.keyUp, false);
             key(mc, mc.options.keySprint, false);
-            aimAtFast(p, center(cut));
-            mc.gameMode.startDestroyBlock(cut, Direction.UP);   // cane breaks instantly
-            mc.player.swing(InteractionHand.MAIN_HAND);
-            farmWanderTicks = 0;
+            Vec3 c = center(farmTarget);
+            aimAt(p, c, CycleaConfig.get().turnMax());   // eased, human turn speed
+            if (farmActCd <= 0 && facing(p, c, 12f)) {
+                mc.gameMode.startDestroyBlock(farmTarget, faceToward(mc, farmTarget));
+                mc.player.swing(InteractionHand.MAIN_HAND);
+                farmActCd = 4;        // ~5 cuts/sec — steady, not spastic
+                farmTarget = null;
+            }
             return;
         }
-        // walk to the nearest ready cane a bit further out
-        BlockPos far = nearestHarvestCane(mc, 18, false);
-        if (far != null) {
-            walkToward(mc, far.getX() + 0.5, far.getZ() + 0.5, far.getY() > p.blockPosition().getY());
+
+        // pick up dropped cane nearby (walk onto the drops to collect them)
+        net.minecraft.world.entity.item.ItemEntity drop = nearestCaneDrop(mc, 8);
+        if (drop != null) {
+            walkToward(mc, drop.getX(), drop.getZ(), false);
+            return;
+        }
+
+        // walk to the nearest ready cane a bit further out (scan throttled for perf)
+        if (--farmScanCd <= 0) {
+            farmFar = nearestHarvestCane(mc, 18, false);
+            farmScanCd = 8;
+        }
+        if (farmFar != null && isCaneSegment(mc, farmFar)) {
+            walkToward(mc, farmFar.getX() + 0.5, farmFar.getZ() + 0.5,
+                farmFar.getY() > p.blockPosition().getY());
             return;
         }
         // this level's cane is gone — PATROL: ride ladders up to the top, then back down,
