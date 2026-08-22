@@ -290,7 +290,7 @@ public class CycleaHud implements HudElement {
         Font f = mc.font;
         int right = g.guiWidth() - 5;
         int y = 5;
-        String title = "BASES ↩ go back to";
+        String title = "BASES ↩ go back to  [C clear]";
         g.fill(right - f.width(title) - 10, 2, right + 2, 4 + 12 + founds.size() * 11, 0x88000000);
         g.text(f, title, right - f.width(title), y, 0xFFFFD24A, true);
         y += 13;

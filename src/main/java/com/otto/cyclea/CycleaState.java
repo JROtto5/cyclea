@@ -227,6 +227,13 @@ public final class CycleaState {
         return new ArrayList<>(founds);
     }
 
+    public synchronized int clearFounds() {
+        int n = founds.size();
+        founds.clear();
+        foundKeys.clear();
+        return n;
+    }
+
     // big on-screen alert banner
     private volatile String alertText = "";
     private volatile int alertColor = 0xFFFFFFFF;
