@@ -2000,17 +2000,28 @@ public final class Autopilot {
             && !mc.level.getBlockState(ahead.above()).blocksMotion();
     }
 
-    /** Walk smoothly toward a spot; jump ONLY to climb a real step or a ladder. */
+    /** Walk smoothly toward a spot; jump ONLY to climb a real step or a ladder. Steers
+     *  around a wall in the way (light obstacle avoidance — a staircase is still best). */
     private void walkToward(Minecraft mc, double tx, double tz, boolean up) {
         var p = mc.player;
         double dx = tx - p.getX();
         double dz = tz - p.getZ();
         float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        aim(p, yaw, up ? -6f : 6f);   // eased turn (aim() smooths it) — no snapping
+
+        BlockPos feet = p.blockPosition();
+        Direction d = Direction.fromYRot(yaw);
+        BlockPos af = feet.relative(d);
+        boolean wall = mc.level.getBlockState(af.above()).blocksMotion();   // head-height blocked
+        if (wall && !solidStep(mc, af)) {
+            // a real wall (not a 1-step) — veer toward whichever side is open
+            boolean leftOpen = !mc.level.getBlockState(feet.relative(d.getCounterClockWise()).above()).blocksMotion();
+            yaw += leftOpen ? -50f : 50f;
+        }
+        aim(p, yaw, up ? -6f : 6f);   // eased, smooth turn
         key(mc, mc.options.keyUp, true);
         key(mc, mc.options.keySprint, false);
-        BlockPos ahead = new BlockPos(Mth.floor(tx), p.blockPosition().getY(), Mth.floor(tz));
-        // jump ONLY to climb a real step or a ladder — never bob in the farm's water channels
+        BlockPos ahead = feet.relative(Direction.fromYRot(yaw));
+        // jump ONLY to climb a real step or a ladder — never bob in the water channels
         key(mc, mc.options.keyJump, up || (solidStep(mc, ahead) && !p.isInWater()));
     }
 
