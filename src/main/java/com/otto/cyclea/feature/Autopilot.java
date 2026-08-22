@@ -756,7 +756,10 @@ public final class Autopilot {
      */
     private Direction chooseSafeDir(Minecraft mc, BlockPos feet,
                                     Direction primary, Direction secondary) {
-        Direction[] base = {primary, secondary, secondary.getOpposite(), primary.getOpposite()};
+        // toward-target first, then sidestep — NO full-retreat (primary.getOpposite),
+        // which caused it to drift backwards through cleared tunnel. Dead-ends are
+        // handled by the tower-up / redirect recovery instead.
+        Direction[] base = {primary, secondary, secondary.getOpposite()};
         Direction committed = detourTicks > 0 ? detourDir : null;
 
         // pass 1: a direction that's clear for 3 blocks ahead (route early)
@@ -1261,15 +1264,13 @@ public final class Autopilot {
         return best;
     }
 
-    /** Rough loot read: shulkers + chests still present vs. a picked-over shell. */
+    /** Intact vs picked-over vs gutted ruins (by loot present, not by griefing blocks). */
     public static String lootRating(TargetScanner.Base b) {
-        if (b.shulkers() >= 1 || b.chests() >= 8) {
-            return "§a★ LOADED (likely untouched)";
-        }
-        if (b.chests() >= 4) {
-            return "§e◆ some loot left";
-        }
-        return "§7likely raided";
+        return switch (b.status()) {
+            case "LOADED" -> "§a★ LOADED (" + b.chests() + "c " + b.shulkers() + "s)";
+            case "partial" -> "§e◆ some loot (" + b.chests() + "c)";
+            default -> "§7☠ RAIDED — ruins (" + b.stations() + " stations, no loot)";
+        };
     }
 
     private void releaseAll(Minecraft mc) {

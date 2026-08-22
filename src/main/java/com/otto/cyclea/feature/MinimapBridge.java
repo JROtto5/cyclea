@@ -64,10 +64,11 @@ public final class MinimapBridge {
 
     /** Red = loaded, gold = some loot, gray = likely raided. */
     private static WaypointColor colorFor(TargetScanner.Base b) {
-        if (b.shulkers() >= 1 || b.chests() >= 8) {
-            return WaypointColor.RED;
-        }
-        return b.chests() >= 4 ? WaypointColor.GOLD : WaypointColor.GRAY;
+        return switch (b.status()) {
+            case "LOADED" -> WaypointColor.RED;      // lots of chests/shulkers
+            case "partial" -> WaypointColor.GOLD;    // some loot left
+            default -> WaypointColor.GRAY;           // raided ruins
+        };
     }
 
     /** Drop a death-point waypoint where the player died. Returns true if placed. */

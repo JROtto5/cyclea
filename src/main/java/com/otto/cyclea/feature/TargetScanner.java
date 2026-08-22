@@ -11,10 +11,21 @@ import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.world.level.block.entity.BarrelBlockEntity;
+import net.minecraft.world.level.block.entity.BeaconBlockEntity;
+import net.minecraft.world.level.block.entity.BeehiveBlockEntity;
+import net.minecraft.world.level.block.entity.BellBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BrewingStandBlockEntity;
+import net.minecraft.world.level.block.entity.CampfireBlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
+import net.minecraft.world.level.block.entity.CrafterBlockEntity;
+import net.minecraft.world.level.block.entity.DispenserBlockEntity;
+import net.minecraft.world.level.block.entity.EnchantingTableBlockEntity;
 import net.minecraft.world.level.block.entity.EnderChestBlockEntity;
+import net.minecraft.world.level.block.entity.HopperBlockEntity;
+import net.minecraft.world.level.block.entity.LecternBlockEntity;
 import net.minecraft.world.level.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -38,9 +49,20 @@ public final class TargetScanner {
 
     /** A detected base: where it is, how much storage it has, and (single-player
      *  only) a peek at the notable contents. On servers {@code loot} is empty. */
-    public record Base(BlockPos center, int chests, int shulkers, String loot) {
+    public record Base(BlockPos center, int chests, int shulkers, int stations, String loot) {
         public int total() {
             return chests + shulkers;
+        }
+
+        /** Intact/loaded vs picked-over vs gutted ruins. */
+        public String status() {
+            if (shulkers >= 1 || chests >= 6) {
+                return "LOADED";
+            }
+            if (chests >= 1) {
+                return "partial";
+            }
+            return "RAIDED";   // only workstations left, loot gone
         }
     }
 
@@ -51,7 +73,17 @@ public final class TargetScanner {
     /** Chests only count when this deep; shulkers count at any height. */
     public static final int CHEST_MAX_Y = 20;
 
-    private record ContainerHit(BlockPos pos, boolean shulker, BlockEntity be) {
+    private record ContainerHit(BlockPos pos, boolean shulker, boolean station, BlockEntity be) {
+    }
+
+    /** Workstations that are block entities — signs a base exists even if looted. */
+    private static boolean isStation(BlockEntity be) {
+        return be instanceof AbstractFurnaceBlockEntity || be instanceof BrewingStandBlockEntity
+            || be instanceof BeaconBlockEntity || be instanceof HopperBlockEntity
+            || be instanceof DispenserBlockEntity || be instanceof LecternBlockEntity
+            || be instanceof BellBlockEntity || be instanceof CampfireBlockEntity
+            || be instanceof BeehiveBlockEntity || be instanceof EnchantingTableBlockEntity
+            || be instanceof CrafterBlockEntity;
     }
 
     public static Scan scan(Minecraft mc) {
@@ -71,14 +103,15 @@ public final class TargetScanner {
                 || be instanceof BarrelBlockEntity
                 || be instanceof EnderChestBlockEntity)
                 && be.getBlockPos().getY() <= CHEST_MAX_Y;                         // below Y20
+            boolean station = isStation(be);                                       // furnaces etc. (ruins signal)
             if (shulker) {
                 shulkersTotal++;
             }
             if (chest) {
                 chestsTotal++;
             }
-            if (shulker || chest) {
-                containers.add(new ContainerHit(be.getBlockPos(), shulker, be));
+            if (shulker || chest || station) {
+                containers.add(new ContainerHit(be.getBlockPos(), shulker, station, be));
             }
         }
 
@@ -164,6 +197,7 @@ public final class TargetScanner {
             }
             int chests = 0;
             int shulkers = 0;
+            int stations = 0;
             long sx = 0;
             long sy = 0;
             long sz = 0;
@@ -171,6 +205,8 @@ public final class TargetScanner {
                 ContainerHit c = pts.get(idx);
                 if (c.shulker()) {
                     shulkers++;
+                } else if (c.station()) {
+                    stations++;
                 } else {
                     chests++;
                 }
@@ -190,7 +226,7 @@ public final class TargetScanner {
                     center = pts.get(idx).pos();
                 }
             }
-            bases.add(new Base(center, chests, shulkers, peekLoot(group, pts)));
+            bases.add(new Base(center, chests, shulkers, stations, peekLoot(group, pts)));
         }
         return bases;
     }
