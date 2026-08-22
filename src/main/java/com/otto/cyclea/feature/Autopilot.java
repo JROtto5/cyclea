@@ -1767,6 +1767,7 @@ public final class Autopilot {
     private int farmWanderTicks = 0;
     private Direction farmDir = Direction.NORTH;
     private boolean farmSelling = false;
+    private boolean farmGoingUp = true;   // patrol direction: up to the top, then back down
 
     /** One tick of sugarcane farming: sell a full pile, else harvest / walk / climb. */
     private void farmStep(Minecraft mc) {
@@ -1803,13 +1804,23 @@ public final class Autopilot {
             walkToward(mc, far.getX() + 0.5, far.getZ() + 0.5, far.getY() > p.blockPosition().getY());
             return;
         }
-        // this level looks harvested — climb a ladder to the next layer if there is one
-        BlockPos ladder = nearestLadder(mc, 6);
-        if (ladder != null) {
-            walkToward(mc, ladder.getX() + 0.5, ladder.getZ() + 0.5, true);   // hold into it = climb
+        // this level's cane is gone — PATROL: ride ladders up to the top, then back down,
+        // so every layer gets re-harvested as it regrows.
+        BlockPos ladUp = nearestLadder(mc, 6, true);
+        BlockPos ladDown = nearestLadder(mc, 6, false);
+        if (farmGoingUp) {
+            if (ladUp != null) {
+                walkToward(mc, ladUp.getX() + 0.5, ladUp.getZ() + 0.5, true);   // hold in = climb
+                return;
+            }
+            farmGoingUp = false;   // no ladder up — top reached, head down
+        }
+        if (ladDown != null) {
+            descendLadder(mc, ladDown);
             return;
         }
-        // nothing nearby — wander the room to find more
+        farmGoingUp = true;        // no ladder down either — bottom reached, head up
+        // nothing to climb — wander this level to find more cane
         wanderFarm(mc);
     }
 
@@ -1854,13 +1865,15 @@ public final class Autopilot {
         return best;
     }
 
-    private BlockPos nearestLadder(Minecraft mc, int r) {
+    private BlockPos nearestLadder(Minecraft mc, int r, boolean up) {
         BlockPos feet = mc.player.blockPosition();
+        int loY = up ? 0 : -6;
+        int hiY = up ? 6 : 1;
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
         BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
         for (int dx = -r; dx <= r; dx++) {
-            for (int dy = -1; dy <= 3; dy++) {
+            for (int dy = loY; dy <= hiY; dy++) {
                 for (int dz = -r; dz <= r; dz++) {
                     m.set(feet.getX() + dx, feet.getY() + dy, feet.getZ() + dz);
                     if (!mc.level.getBlockState(m).is(Blocks.LADDER)) {
@@ -1875,6 +1888,21 @@ public final class Autopilot {
             }
         }
         return best;
+    }
+
+    /** Descend a ladder: get onto its column, then release forward so gravity slides us
+     *  down; once we reach cane on a lower level the harvest branch takes over. */
+    private void descendLadder(Minecraft mc, BlockPos ladder) {
+        var p = mc.player;
+        double dx = ladder.getX() + 0.5 - p.getX();
+        double dz = ladder.getZ() + 0.5 - p.getZ();
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        aim(p, yaw, 8f);   // look slightly down at the ladder
+        key(mc, mc.options.keyJump, false);
+        key(mc, mc.options.keySprint, false);
+        double dist = Math.hypot(dx, dz);
+        // approach the ladder column, then stop pushing so we slide down it
+        key(mc, mc.options.keyUp, dist > 0.8);
     }
 
     /** Walk (and optionally climb/jump) toward a horizontal spot. */
