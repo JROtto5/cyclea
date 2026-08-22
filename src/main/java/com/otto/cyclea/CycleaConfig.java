@@ -41,6 +41,18 @@ public final class CycleaConfig {
     // stash-alert sensitivity for surface mode: 0 = any, 1 = big (default), 2 = huge
     public int stashLevel = 1;
 
+    // scan for bases while mining (off = pure strip-mine, never diverts to bases)
+    public boolean baseScan = true;
+
+    public void cycleBaseScan() {
+        baseScan = !baseScan;
+        save();
+    }
+
+    public String baseScanLabel() {
+        return baseScan ? "On (find bases too)" : "Off (pure strip-mine)";
+    }
+
     // ONE unified "what to do on a find" for both modes (replaces the old separate
     // skip-bases and pause-at-stash toggles): 0 = pin it and keep working (default),
     // 1 = stop and hand it to you, 2 = navigate to it (miner only; scout stops).
@@ -101,11 +113,15 @@ public final class CycleaConfig {
     }
 
     public String modeLabel() {
-        return mode == 1 ? "Surface scout (find stashes)" : "Miner (strip to spawn)";
+        return switch (mode) {
+            case 1 -> "Surface scout (find stashes)";
+            case 2 -> "Sugarcane farm";
+            default -> "Miner (strip to spawn)";
+        };
     }
 
     public void cycleMode() {
-        mode = (mode + 1) % 2;
+        mode = (mode + 1) % 3;
         save();
     }
 
@@ -400,6 +416,7 @@ public final class CycleaConfig {
                 if (sellCommand.equals("sell all")) {
                     sellCommand = "sell";   // migrate old default: /sell opens a GUI, "sell all" doesn't
                 }
+                baseScan = Boolean.parseBoolean(p.getProperty("baseScan", "true"));
                 mode = Integer.parseInt(p.getProperty("mode", "0"));
                 stashLevel = Integer.parseInt(p.getProperty("stashLevel", "1"));
                 onFindLevel = Integer.parseInt(p.getProperty("onFind", "0"));
@@ -428,6 +445,7 @@ public final class CycleaConfig {
         p.setProperty("tracers", Boolean.toString(tracers));
         p.setProperty("autoSell", Boolean.toString(autoSell));
         p.setProperty("sellCommand", sellCommand);
+        p.setProperty("baseScan", Boolean.toString(baseScan));
         p.setProperty("mode", Integer.toString(mode));
         p.setProperty("stashLevel", Integer.toString(stashLevel));
         p.setProperty("onFind", Integer.toString(onFindLevel));

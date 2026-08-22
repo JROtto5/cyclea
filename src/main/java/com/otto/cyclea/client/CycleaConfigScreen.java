@@ -65,6 +65,7 @@ public class CycleaConfigScreen extends Screen {
         addRow(oreMsg(), b -> { c.cycleOreSeek(); b.setMessage(oreMsg()); });
         addRow(oneByOneMsg(), b -> { c.cycleOneByOne(); b.setMessage(oneByOneMsg()); });
         addRow(paceMsg(), b -> { c.cyclePace(); b.setMessage(paceMsg()); });
+        addRow(baseScanMsg(), b -> { c.cycleBaseScan(); b.setMessage(baseScanMsg()); });
         addRow(onFindMsg(), b -> { c.cycleOnFind(); b.setMessage(onFindMsg()); });
         addRow(autoSellMsg(), b -> { c.cycleAutoSell(); b.setMessage(autoSellMsg()); });
         addRow(skipRaidedMsg(), b -> { c.cycleSkipRaided(); b.setMessage(skipRaidedMsg()); });
@@ -168,6 +169,10 @@ public class CycleaConfigScreen extends Screen {
 
     private Component paceMsg() {
         return Component.literal("Speed / server pace: " + CycleaConfig.get().paceLabel());
+    }
+
+    private Component baseScanMsg() {
+        return Component.literal("Find bases: " + CycleaConfig.get().baseScanLabel());
     }
 
     private Component onFindMsg() {

@@ -221,6 +221,40 @@ public final class Autopilot {
         say(mc, "§6[Autopilot] §aGOTO §f" + x + ", " + z + " §7— mining my way there");
     }
 
+    /** Diamond+redstone strip-mine at Y-59. Still PINS bases as waypoints, but never
+     *  diverts to them (onFind = pin & keep working). */
+    public void startStripMine(Minecraft mc) {
+        CycleaConfig c = CycleaConfig.get();
+        c.mode = 0;
+        c.oreSeekLevel = 1;    // diamond + redstone (both drop XP for mending)
+        c.baseScan = true;     // keep scanning so bases still get marked on the map
+        c.onFindLevel = 0;     // pin them, but keep mining — never chase
+        c.save();
+        if (!active) {
+            active = true;
+            resetRunState();
+            CycleaState.get().setActive(true);
+            targetY = depthForDimension(mc);
+            retarget(mc);
+        }
+        say(mc, "§6[Autopilot] §b⛏ STRIP-MINE §7— diamond+redstone @ Y-59, bases get pinned (not chased)");
+    }
+
+    /** Sugarcane farm: harvest ready cane, climb ladders, sell the pile. */
+    public void startFarm(Minecraft mc) {
+        CycleaConfig c = CycleaConfig.get();
+        c.mode = 2;
+        c.save();
+        farmSelling = false;
+        farmWanderTicks = 0;
+        if (!active) {
+            active = true;
+            resetRunState();
+            CycleaState.get().setActive(true);
+        }
+        say(mc, "§6[Autopilot] §a🌾 SUGARCANE FARM §7— harvesting + auto-selling 24/7");
+    }
+
     /** Clear a custom destination and head back to spawn. */
     public void gotoSpawn(Minecraft mc) {
         hasGoto = false;
@@ -696,6 +730,11 @@ public final class Autopilot {
             surfaceStep(mc);
             return;
         }
+        // 1b2b) SUGARCANE FARM mode: harvest ready cane, climb ladders, sell the pile.
+        if (CycleaConfig.get().mode == 2) {
+            farmStep(mc);
+            return;
+        }
 
         // 1b3) Y-60 CLIMB — TOP PRIORITY. Getting back to the target depth beats everything.
         BlockPos feetC = player.blockPosition();
@@ -817,7 +856,7 @@ public final class Autopilot {
 
         // 2) base found? (throttled — scanning every tick would lag)
         //    switch to navigating toward it; we hand control back on arrival.
-        if (!approaching && ++scanTick >= 40) {
+        if (CycleaConfig.get().baseScan && !approaching && ++scanTick >= 40) {
             scanTick = 0;
             TargetScanner.Scan scan = TargetScanner.scan(mc);
             // always pin every base to the map so you can find them yourself
@@ -1607,6 +1646,7 @@ public final class Autopilot {
                 sellState = 2;
             } else if (++sellWaitTicks > 60) {
                 sellState = 0;   // never opened — step() will fall back to dumping
+                farmSelling = false;
                 say(mc, "§7sell menu didn't open — I'll dump instead");
             }
             return;
@@ -1615,6 +1655,7 @@ public final class Autopilot {
         var menu = player.containerMenu;
         if (menu == null || menu.containerId == 0) {
             sellState = 0;
+            farmSelling = false;
             return;
         }
         int buildStacks = 0;
@@ -1631,14 +1672,21 @@ public final class Autopilot {
                 continue;   // only shift OUR inventory items, not the sell slots
             }
             ItemStack s = slot.getItem();
-            if (!isMined(s)) {
-                continue;   // tools, food, emeralds (money), torches — leave them
-            }
-            if (BUILD.contains(itemPath(s)) && buildStacks <= 1) {
-                continue;   // keep one building stack for pillaring/bridging
-            }
-            if (BUILD.contains(itemPath(s))) {
-                buildStacks--;
+            // farm mode sells ONLY sugarcane; miner mode sells mined ores/stone
+            if (farmSelling) {
+                if (!itemPath(s).equals("sugar_cane")) {
+                    continue;
+                }
+            } else {
+                if (!isMined(s)) {
+                    continue;   // tools, food, emeralds (money), torches — leave them
+                }
+                if (BUILD.contains(itemPath(s)) && buildStacks <= 1) {
+                    continue;   // keep one building stack for pillaring/bridging
+                }
+                if (BUILD.contains(itemPath(s))) {
+                    buildStacks--;
+                }
             }
             mc.gameMode.handleContainerInput(menu.containerId, i, 0,
                 net.minecraft.world.inventory.ContainerInput.QUICK_MOVE, player);
@@ -1647,7 +1695,9 @@ public final class Autopilot {
         player.closeContainer();   // ESC → confirm the sale
         sellState = 0;
         sellCd = 60;               // ~3s before another sell
-        say(mc, "§a$ sold " + moved + " mined stack" + (moved == 1 ? "" : "s") + " §7— back to work");
+        say(mc, "§a$ sold " + moved + (farmSelling ? " cane stack" : " mined stack")
+            + (moved == 1 ? "" : "s") + " §7— back to work");
+        farmSelling = false;
     }
 
     private static String itemPath(ItemStack s) {
@@ -1710,6 +1760,148 @@ public final class Autopilot {
             return true;
         }
         return false;
+    }
+
+    // ---------------- Sugarcane farm ----------------
+
+    private int farmWanderTicks = 0;
+    private Direction farmDir = Direction.NORTH;
+    private boolean farmSelling = false;
+
+    /** One tick of sugarcane farming: sell a full pile, else harvest / walk / climb. */
+    private void farmStep(Minecraft mc) {
+        var p = mc.player;
+        if (handleEating(mc)) {
+            return;
+        }
+        // sell when we've built a good pile of cane (or the pack is filling up)
+        int cane = countItem(p, "sugar_cane");
+        if (sellState == 0 && CycleaConfig.get().autoSell
+            && (cane >= 192 || p.getInventory().getFreeSlot() < 0)) {
+            mc.player.connection.sendCommand(CycleaConfig.get().sellCommand.replaceFirst("^/", ""));
+            farmSelling = true;
+            sellState = 1;
+            sellWaitTicks = 0;
+            say(mc, "§e/" + CycleaConfig.get().sellCommand + " §7— selling " + cane + " cane…");
+            return;
+        }
+
+        // harvest the nearest ready cane within reach (top segments only — leaves the base)
+        BlockPos cut = nearestHarvestCane(mc, 5, true);
+        if (cut != null) {
+            key(mc, mc.options.keyUp, false);
+            key(mc, mc.options.keySprint, false);
+            aimAtFast(p, center(cut));
+            mc.gameMode.startDestroyBlock(cut, Direction.UP);   // cane breaks instantly
+            mc.player.swing(InteractionHand.MAIN_HAND);
+            farmWanderTicks = 0;
+            return;
+        }
+        // walk to the nearest ready cane a bit further out
+        BlockPos far = nearestHarvestCane(mc, 18, false);
+        if (far != null) {
+            walkToward(mc, far.getX() + 0.5, far.getZ() + 0.5, far.getY() > p.blockPosition().getY());
+            return;
+        }
+        // this level looks harvested — climb a ladder to the next layer if there is one
+        BlockPos ladder = nearestLadder(mc, 6);
+        if (ladder != null) {
+            walkToward(mc, ladder.getX() + 0.5, ladder.getZ() + 0.5, true);   // hold into it = climb
+            return;
+        }
+        // nothing nearby — wander the room to find more
+        wanderFarm(mc);
+    }
+
+    private static int countItem(net.minecraft.client.player.LocalPlayer p, String path) {
+        int n = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = p.getInventory().getItem(i);
+            if (!s.isEmpty() && itemPath(s).equals(path)) {
+                n += s.getCount();
+            }
+        }
+        return n;
+    }
+
+    /** Nearest harvestable cane (a sugar_cane with sugar_cane directly below it). */
+    private BlockPos nearestHarvestCane(Minecraft mc, int r, boolean reachable) {
+        var p = mc.player;
+        BlockPos feet = p.blockPosition();
+        Vec3 eye = p.getEyePosition();
+        BlockPos best = null;
+        double bestD = Double.MAX_VALUE;
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dy = -3; dy <= 4; dy++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    m.set(feet.getX() + dx, feet.getY() + dy, feet.getZ() + dz);
+                    if (!mc.level.getBlockState(m).is(Blocks.SUGAR_CANE)
+                        || !mc.level.getBlockState(m.below()).is(Blocks.SUGAR_CANE)) {
+                        continue;   // only cut segments that sit on more cane (leave the base)
+                    }
+                    double d = eye.distanceToSqr(Vec3.atCenterOf(m));
+                    if (reachable && d > 20.0) {
+                        continue;   // ~4.5 block reach
+                    }
+                    if (d < bestD) {
+                        bestD = d;
+                        best = m.immutable();
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private BlockPos nearestLadder(Minecraft mc, int r) {
+        BlockPos feet = mc.player.blockPosition();
+        BlockPos best = null;
+        double bestD = Double.MAX_VALUE;
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dy = -1; dy <= 3; dy++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    m.set(feet.getX() + dx, feet.getY() + dy, feet.getZ() + dz);
+                    if (!mc.level.getBlockState(m).is(Blocks.LADDER)) {
+                        continue;
+                    }
+                    double d = dx * dx + dz * dz;
+                    if (d < bestD) {
+                        bestD = d;
+                        best = m.immutable();
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    /** Walk (and optionally climb/jump) toward a horizontal spot. */
+    private void walkToward(Minecraft mc, double tx, double tz, boolean up) {
+        var p = mc.player;
+        double dx = tx - p.getX();
+        double dz = tz - p.getZ();
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        aim(p, yaw, up ? -8f : 4f);
+        key(mc, mc.options.keyUp, true);
+        key(mc, mc.options.keySprint, false);
+        BlockPos ahead = new BlockPos(Mth.floor(tx), p.blockPosition().getY(), Mth.floor(tz));
+        boolean blocked = !passable(mc, ahead);
+        key(mc, mc.options.keyJump, up || blocked);   // climb ladders / hop small steps
+    }
+
+    private void wanderFarm(Minecraft mc) {
+        if (--farmWanderTicks <= 0) {
+            farmDir = Direction.from2DDataValue(rng.nextInt(4));
+            farmWanderTicks = 30 + rng.nextInt(30);
+        }
+        var p = mc.player;
+        aim(p, farmDir.toYRot(), 2f);
+        BlockPos ahead = p.blockPosition().relative(farmDir);
+        key(mc, mc.options.keyUp, true);
+        key(mc, mc.options.keySprint, false);
+        key(mc, mc.options.keyJump, !passable(mc, ahead));
     }
 
     // ---------------- Stash vault builder ----------------
