@@ -1849,11 +1849,11 @@ public final class Autopilot {
             key(mc, mc.options.keyUp, false);
             key(mc, mc.options.keySprint, false);
             Vec3 c = center(farmTarget);
-            aimAt(p, c, CycleaConfig.get().turnMax());   // eased, human turn speed
-            if (farmActCd <= 0 && facing(p, c, 12f)) {
+            aimAt(p, c, 9f);          // gentle, smooth camera glide (not a snap)
+            if (farmActCd <= 0 && facing(p, c, 10f)) {
                 mc.gameMode.startDestroyBlock(farmTarget, faceToward(mc, farmTarget));
                 mc.player.swing(InteractionHand.MAIN_HAND);
-                farmActCd = 4;        // ~5 cuts/sec — steady, not spastic
+                farmActCd = 9;        // ~2/sec — calm, human-paced cutting
                 farmTarget = null;
             }
             return;
@@ -1882,13 +1882,13 @@ public final class Autopilot {
         BlockPos ladDown = nearestLadder(mc, 6, false);
         if (farmGoingUp) {
             if (ladUp != null) {
-                walkToward(mc, ladUp.getX() + 0.5, ladUp.getZ() + 0.5, true);   // hold in = climb
+                climbLadder(mc, ladUp, true);
                 return;
             }
             farmGoingUp = false;   // no ladder up — top reached, head down
         }
         if (ladDown != null) {
-            descendLadder(mc, ladDown);
+            climbLadder(mc, ladDown, false);
             return;
         }
         farmGoingUp = true;        // no ladder down either — bottom reached, head up
@@ -1962,19 +1962,34 @@ public final class Autopilot {
         return best;
     }
 
-    /** Descend a ladder: get onto its column, then release forward so gravity slides us
-     *  down; once we reach cane on a lower level the harvest branch takes over. */
-    private void descendLadder(Minecraft mc, BlockPos ladder) {
+    /** Climb (or descend) a ladder correctly: read which face it's on, approach the open
+     *  side, then push INTO it to go up (or release to slide down). Fixes getting stuck on
+     *  the wrong side. */
+    private void climbLadder(Minecraft mc, BlockPos ladder, boolean up) {
         var p = mc.player;
+        Direction face;
+        try {
+            face = mc.level.getBlockState(ladder)
+                .getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.HORIZONTAL_FACING);
+        } catch (Throwable t) {
+            face = Direction.NORTH;
+        }
+        key(mc, mc.options.keySprint, false);
         double dx = ladder.getX() + 0.5 - p.getX();
         double dz = ladder.getZ() + 0.5 - p.getZ();
-        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        aim(p, yaw, 8f);   // look slightly down at the ladder
-        key(mc, mc.options.keyJump, false);
-        key(mc, mc.options.keySprint, false);
         double dist = Math.hypot(dx, dz);
-        // approach the ladder column, then stop pushing so we slide down it
-        key(mc, mc.options.keyUp, dist > 0.8);
+        if (dist > 0.55) {
+            // approach the ladder's column from its OPEN side, walking straight at it
+            float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+            aim(p, yaw, up ? -10f : 10f);
+            key(mc, mc.options.keyUp, true);
+            key(mc, mc.options.keyJump, up && dist < 1.4 && solidStep(mc, p.blockPosition().relative(face.getOpposite())));
+            return;
+        }
+        // on the ladder: face INTO the wall it's on; push up to climb, release to descend
+        aim(p, face.getOpposite().toYRot(), up ? -35f : 25f);
+        key(mc, mc.options.keyUp, up);
+        key(mc, mc.options.keyJump, false);
     }
 
     /** True only if there's a REAL full-block step to climb one ahead. Carpet, slabs,
