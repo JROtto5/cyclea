@@ -71,6 +71,7 @@ public final class Autopilot {
     private int mineTicks = 0;            // how long we've been on the current mining target
     private long lastMiningKey = 0;
     private final java.util.ArrayDeque<BlockPos> placedTrapdoors = new java.util.ArrayDeque<>();
+    private final java.util.Set<Long> placedBlocks = new java.util.HashSet<>();   // don't re-mine our own bridges/torches
     private double lastProgX = Double.NaN;   // anti-stuck progress tracking
     private double lastProgZ = Double.NaN;
     private int stuckTicks = 0;
@@ -291,6 +292,7 @@ public final class Autopilot {
         axisX = false;
         glanceTimer = 0;
         placedTrapdoors.clear();
+        placedBlocks.clear();
         lastProgX = Double.NaN;
         lastProgZ = Double.NaN;
         stuckTicks = 0;
@@ -326,6 +328,10 @@ public final class Autopilot {
         handedOff = true;
         say(mc, "§6[Autopilot] §7stopped — " + reason
             + " §8(handoff #" + takeovers + ")");
+        if (oresMined > 0 || blocksTraveled > 5) {
+            say(mc, "§8   run so far: §7" + getBlocksTraveled() + "m, §b" + oresMined
+                + " ores §7(" + getOresPerHour() + "/hr), §7" + (getSessionSeconds() / 60) + "m active");
+        }
     }
 
     private static String stripCodes(String s) {
@@ -1131,6 +1137,12 @@ public final class Autopilot {
             BlockHitResult bhr = new BlockHitResult(hit, face, n, false);
             mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, bhr);
             mc.player.swing(InteractionHand.MAIN_HAND);
+            if (!suffix.equals("trapdoor")) {   // remember bridges/pillars/torches so we don't re-dig them
+                placedBlocks.add(target.asLong());
+                if (placedBlocks.size() > 256) {
+                    placedBlocks.clear();
+                }
+            }
             return true;
         }
         return false;
@@ -1306,7 +1318,8 @@ public final class Autopilot {
     /** A block we may dig: solid, safe, not unbreakable, not given-up-on. */
     private boolean canMine(Minecraft mc, BlockPos p) {
         return !passable(mc, p) && !hazard(mc, p) && !hasHazardNeighbor(mc, p)
-            && !isUnbreakable(mc.level.getBlockState(p)) && !oreBlacklist.contains(p.asLong());
+            && !isUnbreakable(mc.level.getBlockState(p)) && !oreBlacklist.contains(p.asLong())
+            && !placedBlocks.contains(p.asLong());
     }
 
     /**
@@ -1374,6 +1387,16 @@ public final class Autopilot {
         }
         if (target == null) {
             return false;
+        }
+        // creeper: DON'T melee it point-blank — back away so it can't blow up on us
+        // (and hurt the server/terrain). Retreat, don't fight.
+        if (target instanceof net.minecraft.world.entity.monster.Creeper && bestD < 6.5) {
+            Vec3 away = mc.player.position().subtract(target.position()).normalize();
+            float yaw = (float) Math.toDegrees(Math.atan2(-away.x, away.z));
+            aim(mc.player, yaw, 0f);
+            key(mc, mc.options.keyUp, true);
+            key(mc, mc.options.keySprint, true);
+            return true;
         }
         // grab a sword if we have one
         Inventory inv = mc.player.getInventory();
