@@ -1793,6 +1793,15 @@ public final class Autopilot {
     private int farmStuckTicks = 0;
     private double farmStuckX = Double.NaN;
     private double farmStuckZ = Double.NaN;
+    private String lastFarmStatus = "";
+
+    /** Debounced farm status to chat — only prints when the message changes. */
+    private void farmSay(Minecraft mc, String s) {
+        if (!s.equals(lastFarmStatus)) {
+            lastFarmStatus = s;
+            say(mc, "§8[farm] §7" + s);
+        }
+    }
 
     /** A* route to {@code goal} (farm-aware: carpet/cane/ladders walkable, climbs ±1 steps),
      *  followed node by node. Re-plans when consumed / the goal moved / on a timer. If it
@@ -1817,6 +1826,9 @@ public final class Autopilot {
             farmPathGoal = goal;
             farmPathIdx = 0;
             farmRepathCd = 30;
+            farmSay(mc, "route→Y" + goal.getY() + ": "
+                + (farmPath == null ? "§cNO PATH" : farmPath.size() + " steps")
+                + (stuck ? " (was stuck)" : ""));
             if (stuck) {
                 farmStuckTicks = 0;
                 if (farmPath == null) {
@@ -1972,16 +1984,19 @@ public final class Autopilot {
         // Going up: only chase cane on higher floors (so regrown cane below can't drag it
         // back down and trap it bouncing 1<->2). At the top, flip to down; at the bottom,
         // flip to up. This walks 1→2→3→4→3→2→1→… forever.
-        BlockPos nextUp = nearestHarvestCane(mc, feet, 40, 2, 40);     // any higher floor
-        BlockPos nextDown = nearestHarvestCane(mc, feet, 40, -40, -2); // any lower floor
+        BlockPos nextUp = nearestHarvestCane(mc, feet, 24, 2, 32);     // any higher floor
+        BlockPos nextDown = nearestHarvestCane(mc, feet, 24, -32, -2); // any lower floor
         if (farmGoingUp) {
             if (nextUp != null) {
+                farmSay(mc, "▲ up to cane Y" + nextUp.getY() + " (I'm Y" + feet.getY() + ")");
                 farmPathTo(mc, feet, nextUp);
                 return;
             }
             farmGoingUp = false;                 // nothing higher — head back down
+            farmSay(mc, "top reached — turning down");
         }
         if (nextDown != null) {
+            farmSay(mc, "▼ down to cane Y" + nextDown.getY() + " (I'm Y" + feet.getY() + ")");
             farmPathTo(mc, feet, nextDown);
             return;
         }
