@@ -778,6 +778,18 @@ public final class Autopilot {
                 mc.options.autoJump().set(Boolean.TRUE);
             }
 
+            // EASY WAY UP FIRST: if any neighbour is a 1-block step up (almost always the
+            // tunnel we just came from, whose floor sits at our target level), just BACK UP
+            // onto it — sprint-jump mounts it cleanly. This is what a player does.
+            Direction up = findStepUp(mc, feetC);
+            if (up != null) {
+                aim(player, up.toYRot(), -6f);
+                key(mc, mc.options.keyUp, true);
+                key(mc, mc.options.keySprint, true);
+                key(mc, mc.options.keyJump, true);
+                return;
+            }
+
             // JUST STAIR UP. One fixed direction, one dumb reliable loop:
             // clear our own headroom → make sure there's a tread block ahead →
             // clear the two blocks above it → walk into it (auto-jump climbs) → repeat.
@@ -2508,11 +2520,49 @@ public final class Autopilot {
         if (inv.getSelectedItem().getItem() instanceof BlockItem) {
             return true;
         }
+        // already a block in the hotbar? select it
         int slot = findHotbar(inv, s -> s.getItem() instanceof BlockItem);
-        if (slot < 0) {
+        if (slot >= 0) {
+            inv.setSelectedSlot(slot);
+            return true;
+        }
+        // THE Y-60 FIX: no block in the hotbar, but we mine cobble constantly — pull one
+        // up from the main inventory (9-35) into a spare hotbar slot so we can always
+        // pillar/stair out. Prefer swapping into an empty slot, else a non-tool slot.
+        int src = -1;
+        for (int i = 9; i < 36; i++) {
+            if (inv.getItem(i).getItem() instanceof BlockItem) {
+                src = i;
+                break;
+            }
+        }
+        if (src < 0) {
+            return false;   // genuinely no blocks anywhere
+        }
+        int dest = -1;
+        for (int i = 0; i < 9; i++) {
+            if (inv.getItem(i).isEmpty()) {
+                dest = i;
+                break;
+            }
+        }
+        if (dest < 0) {
+            for (int i = 0; i < 9; i++) {   // no empty slot — bump a non-tool/non-food item
+                ItemStack s = inv.getItem(i);
+                if (!isPickaxe(s) && !tool(s, "sword") && !tool(s, "axe") && !tool(s, "shovel")
+                    && !s.is(Items.GOLDEN_APPLE)) {
+                    dest = i;
+                    break;
+                }
+            }
+        }
+        if (dest < 0) {
             return false;
         }
-        inv.setSelectedSlot(slot);
+        // SWAP main-inventory slot `src` (menu index == inv index for 9-35) into hotbar `dest`
+        mc.gameMode.handleContainerInput(mc.player.inventoryMenu.containerId, src, dest,
+            net.minecraft.world.inventory.ContainerInput.SWAP, mc.player);
+        inv.setSelectedSlot(dest);
         return true;
     }
 
