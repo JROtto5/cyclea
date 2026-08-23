@@ -1871,14 +1871,19 @@ public final class Autopilot {
         float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
         aim(p, yaw, 0f);   // smooth, eased turn (human, not a snap)
 
-        boolean facing = Math.abs(Mth.degreesDifference(p.getYRot(), yaw)) < 35f;
+        double yawErr = Math.abs(Mth.degreesDifference(p.getYRot(), yaw));
+        boolean facing = yawErr < 35f;
         int feetY = p.blockPosition().getY();
         boolean climbing = nodeY > feetY;
 
         key(mc, mc.options.keyUp, facing);
         key(mc, mc.options.keySprint, facing && dist > 2.2 && !climbing && !p.isInWater());
-        // auto-jump handles the step; hop explicitly when we're right at a higher step
-        key(mc, mc.options.keyJump, (climbing && dist < 1.6) || p.isInWater());
+        // Baritone-style ascend timing: only jump when we're right at the step (<1.2),
+        // lined up with it (tight yaw), and won't bonk our head — otherwise auto-jump (on
+        // in farm mode) steps us up. Jumping early/misaligned was why it missed stairs.
+        boolean headClear = !mc.level.getBlockState(p.blockPosition().above(2)).blocksMotion();
+        boolean ascendHop = climbing && dist < 1.25 && yawErr < 22f && headClear;
+        key(mc, mc.options.keyJump, ascendHop || p.isInWater());
     }
 
     private BlockPos nearestStairs(Minecraft mc, int r) {
