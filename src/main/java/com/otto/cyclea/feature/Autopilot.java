@@ -1841,18 +1841,44 @@ public final class Autopilot {
             wanderFarm(mc);
             return;
         }
-        BlockPos node = farmPath.get(Math.min(farmPathIdx, farmPath.size() - 1));
-        double ndx = node.getX() + 0.5 - p.getX();
-        double ndz = node.getZ() + 0.5 - p.getZ();
-        if (ndx * ndx + ndz * ndz < 1.6 && Math.abs(node.getY() - feet.getY()) <= 1) {
-            farmPathIdx++;
-            if (farmPathIdx >= farmPath.size()) {
-                farmPath = null;
-                return;
+        // advance past every node we've already reached (skip, don't backtrack)
+        while (farmPathIdx < farmPath.size() - 1) {
+            BlockPos n = farmPath.get(farmPathIdx);
+            double dxN = n.getX() + 0.5 - p.getX();
+            double dzN = n.getZ() + 0.5 - p.getZ();
+            if (dxN * dxN + dzN * dzN < 0.75 && Math.abs(n.getY() - feet.getY()) <= 1) {
+                farmPathIdx++;
+            } else {
+                break;
             }
-            node = farmPath.get(farmPathIdx);
         }
-        walkToward(mc, node.getX() + 0.5, node.getZ() + 0.5, node.getY() > feet.getY());
+        if (farmPathIdx >= farmPath.size()) {
+            farmPath = null;
+            return;
+        }
+        BlockPos node = farmPath.get(farmPathIdx);
+        stepToward(mc, node.getX() + 0.5, node.getZ() + 0.5, node.getY());
+    }
+
+    /** Baritone-style node executor: face the node with a smooth turn, walk forward only
+     *  when roughly facing it (no sidestep = no spin), sprint on flat straights, and let
+     *  auto-jump climb steps (with an explicit hop when right at a higher step). */
+    private void stepToward(Minecraft mc, double cx, double cz, int nodeY) {
+        var p = mc.player;
+        double dx = cx - p.getX();
+        double dz = cz - p.getZ();
+        double dist = Math.hypot(dx, dz);
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        aim(p, yaw, 0f);   // smooth, eased turn (human, not a snap)
+
+        boolean facing = Math.abs(Mth.degreesDifference(p.getYRot(), yaw)) < 35f;
+        int feetY = p.blockPosition().getY();
+        boolean climbing = nodeY > feetY;
+
+        key(mc, mc.options.keyUp, facing);
+        key(mc, mc.options.keySprint, facing && dist > 2.2 && !climbing && !p.isInWater());
+        // auto-jump handles the step; hop explicitly when we're right at a higher step
+        key(mc, mc.options.keyJump, (climbing && dist < 1.6) || p.isInWater());
     }
 
     private BlockPos nearestStairs(Minecraft mc, int r) {
