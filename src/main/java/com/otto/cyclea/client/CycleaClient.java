@@ -108,6 +108,11 @@ public class CycleaClient implements ClientModInitializer {
                         Autopilot.get().startStripMine(Minecraft.getInstance());
                         return 1;
                     }))
+                .then(ClientCommands.literal("minemoney")
+                    .executes(ctx -> {
+                        Autopilot.get().startMineMoney(Minecraft.getInstance());
+                        return 1;
+                    }))
                 .then(ClientCommands.literal("farm")
                     .executes(ctx -> {
                         Autopilot.get().startFarm(Minecraft.getInstance());
@@ -333,10 +338,10 @@ public class CycleaClient implements ClientModInitializer {
 
         // ore X-ray: whenever search/auto is on, plot selected ores on the radar (through walls)
         if ((st.isActive() || Autopilot.get().isActive()) && mc.level != null) {
-            if (++oreScanCounter >= 20) {
+            if (++oreScanCounter >= 30) {   // lighter cadence + smaller cube = less CPU/lag
                 oreScanCounter = 0;
-                st.setOreBlips(TargetScanner.scanOres(mc, 20));
-                st.setContainerBlips(TargetScanner.scanContainers(mc, 48));
+                st.setOreBlips(TargetScanner.scanOres(mc, 12));
+                st.setContainerBlips(TargetScanner.scanContainers(mc, 32));
             }
         } else {
             st.setOreBlips(java.util.List.of());

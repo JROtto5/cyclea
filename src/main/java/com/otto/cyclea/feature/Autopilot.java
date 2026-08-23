@@ -240,6 +240,29 @@ public final class Autopilot {
         say(mc, "§6[Autopilot] §b⛏ STRIP-MINE (GOD) §7— grabbing ALL ores @ Y-59, bases pinned");
     }
 
+    /** MINE MONEY: calm, efficient strip-mine for the money ores (diamond, redstone, gold,
+     *  emerald, lapis, quartz). Smooth camera (no look-around jitter that spazzes the screen),
+     *  pins bases, never chases, sells/dumps/eats/guards, never stuck. */
+    public void startMineMoney(Minecraft mc) {
+        CycleaConfig c = CycleaConfig.get();
+        c.mode = 0;
+        c.oreSeekLevel = 2;    // rare + XP ores: diamond, redstone, gold, emerald, lapis, quartz
+        c.baseScan = true;
+        c.onFindLevel = 0;
+        c.glanceLevel = 0;     // no idle look-around — calmer screen
+        c.turnLevel = 1;       // medium, eased turns (smooth, not snappy)
+        c.paceLevel = 1;
+        c.save();
+        if (!active) {
+            active = true;
+            resetRunState();
+            CycleaState.get().setActive(true);
+            targetY = depthForDimension(mc);
+            retarget(mc);
+        }
+        say(mc, "§6[Autopilot] §a$$ MINE MONEY §7— diamond/redstone/gold @ Y-59, smooth & steady");
+    }
+
     /** Sugarcane farm: harvest ready cane, climb ladders, sell the pile. */
     public void startFarm(Minecraft mc) {
         CycleaConfig c = CycleaConfig.get();
