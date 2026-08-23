@@ -1868,6 +1868,14 @@ public final class Autopilot {
         double dx = cx - p.getX();
         double dz = cz - p.getZ();
         double dist = Math.hypot(dx, dz);
+        // ON the node already (horizontally): don't rotate toward a point under our feet —
+        // that's the yaw-jitter spin. Just settle (climb if this node is a step up).
+        if (dist < 0.6) {
+            key(mc, mc.options.keyUp, nodeY > p.blockPosition().getY());
+            key(mc, mc.options.keySprint, false);
+            key(mc, mc.options.keyJump, nodeY > p.blockPosition().getY());
+            return;
+        }
         float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
         aim(p, yaw, 0f);   // smooth, eased turn (human, not a snap)
 
