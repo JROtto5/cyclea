@@ -53,18 +53,31 @@ public final class Pathfinder {
         if (from == null) {
             return null;
         }
+        // Weighted A*: farms are big and open, so a plain heuristic flood-fills the floor
+        // and burns the budget before reaching the far staircase. A heavy weight makes it
+        // greedy — it beelines toward the goal, finds the stairs, and climbs within budget.
+        double weight = farm ? 2.5 : 1.0;
+        int budget = farm ? 30000 : MAX_NODES;
+
         PriorityQueue<Node> open = new PriorityQueue<>((a, b) -> Double.compare(a.f, b.f));
         Map<Long, Double> best = new HashMap<>();
         Map<Long, BlockPos> came = new HashMap<>();
 
-        open.add(new Node(from, 0, h(from, goal)));
+        open.add(new Node(from, 0, weight * h(from, goal)));
         best.put(from.asLong(), 0.0);
         int expanded = 0;
+        BlockPos closest = from;
+        double closestH = h(from, goal);
 
-        while (!open.isEmpty() && expanded++ < MAX_NODES) {
+        while (!open.isEmpty() && expanded++ < budget) {
             Node cur = open.poll();
             if (horizClose(cur.pos, goal, 2) && Math.abs(cur.pos.getY() - goal.getY()) <= 3) {
                 return reconstruct(came, cur.pos);
+            }
+            double curH = h(cur.pos, goal);
+            if (curH < closestH) {          // track the best-so-far in case we run out
+                closestH = curH;
+                closest = cur.pos;
             }
             for (Direction d : Direction.Plane.HORIZONTAL) {
                 for (int dy = -1; dy <= 1; dy++) {
@@ -78,12 +91,17 @@ public final class Pathfinder {
                     if (ng < best.getOrDefault(key, Double.MAX_VALUE)) {
                         best.put(key, ng);
                         came.put(key, cur.pos);
-                        open.add(new Node(next, ng, ng + h(next, goal)));
+                        open.add(new Node(next, ng, ng + weight * h(next, goal)));
                     }
                 }
             }
         }
-        return null;   // no path within budget — caller falls back
+        // out of budget: hand back a partial route toward the goal so it keeps progressing
+        // (walk to the closest point we found, then it re-plans from there)
+        if (farm && closest != from) {
+            return reconstruct(came, closest);
+        }
+        return null;
     }
 
     /** Move cost from a to b (b = feet of the destination), or null if illegal. */

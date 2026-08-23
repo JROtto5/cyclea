@@ -1927,6 +1927,12 @@ public final class Autopilot {
      *  it (aim + hold attack), climb to the next level when this one's clear, sell a pile. */
     private void farmStep(Minecraft mc) {
         var p = mc.player;
+        // let the engine climb 1-block stair steps for us (reliable — manual jump timing
+        // on full-block stairs was the "can't climb" bug). Restored when we stop/switch.
+        if (savedAutoJump == null) {
+            savedAutoJump = mc.options.autoJump().get();
+            mc.options.autoJump().set(Boolean.TRUE);
+        }
         if (handleEating(mc)) {
             key(mc, mc.options.keyAttack, false);
             return;
