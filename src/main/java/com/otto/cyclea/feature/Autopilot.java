@@ -221,12 +221,12 @@ public final class Autopilot {
         say(mc, "§6[Autopilot] §aGOTO §f" + x + ", " + z + " §7— mining my way there");
     }
 
-    /** Diamond+redstone strip-mine at Y-59. Still PINS bases as waypoints, but never
-     *  diverts to them (onFind = pin & keep working). */
+    /** God-tier strip-mine at Y-59: grabs EVERY ore it passes, pins bases (never chases),
+     *  auto-sells/dumps/eats/guards tools, and never gets stuck. */
     public void startStripMine(Minecraft mc) {
         CycleaConfig c = CycleaConfig.get();
         c.mode = 0;
-        c.oreSeekLevel = 1;    // diamond + redstone (both drop XP for mending)
+        c.oreSeekLevel = 3;    // ALL ores — diamond, redstone, gold, iron, lapis, coal, copper…
         c.baseScan = true;     // keep scanning so bases still get marked on the map
         c.onFindLevel = 0;     // pin them, but keep mining — never chase
         c.save();
@@ -237,7 +237,7 @@ public final class Autopilot {
             targetY = depthForDimension(mc);
             retarget(mc);
         }
-        say(mc, "§6[Autopilot] §b⛏ STRIP-MINE §7— diamond+redstone @ Y-59, bases get pinned (not chased)");
+        say(mc, "§6[Autopilot] §b⛏ STRIP-MINE (GOD) §7— grabbing ALL ores @ Y-59, bases pinned");
     }
 
     /** Sugarcane farm: harvest ready cane, climb ladders, sell the pile. */
@@ -1036,7 +1036,7 @@ public final class Autopilot {
             if (odx * tdx + odz * tdz < 0 && odx * odx + odz * odz > 4) {
                 oreBlacklist.add(oreGoal.asLong());
                 oreGoal = null;
-            } else if (++oreGoalTicks > 80) {          // ~4s chasing one ore = give up
+            } else if (++oreGoalTicks > 120) {         // ~6s chasing one ore = give up (wider reach)
                 oreBlacklist.add(oreGoal.asLong());
                 if (oreBlacklist.size() > 128) {
                     oreBlacklist.clear();
@@ -1050,7 +1050,7 @@ public final class Autopilot {
         }
         if (oreGoal == null && CycleaConfig.get().oreSeekLevel > 0 && ++oreScanTick >= 8) {
             oreScanTick = 0;
-            oreGoal = findWantedOre(mc, player.blockPosition(), 5);
+            oreGoal = findWantedOre(mc, player.blockPosition(), 7);   // wider reach into caves/tunnels
             if (oreGoal != null) {
                 oreGoalTicks = 0;
                 say(mc, "§b⛏ ore spotted — detouring to grab it");
