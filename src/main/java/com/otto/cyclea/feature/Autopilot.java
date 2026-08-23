@@ -1943,12 +1943,15 @@ public final class Autopilot {
         if (cane != null) {
             Vec3 c = center(cane);
             if (p.getEyePosition().distanceToSqr(c) <= 20.0) {
-                // in reach — MINE it exactly like the miner: aim, then hold attack
+                // in reach — aim at it, and swing ONLY when the crosshair is truly on cane
+                // (never on a stair/structure block in the way — that ate the staircase)
                 farmPath = null;
                 key(mc, mc.options.keyUp, false);
                 key(mc, mc.options.keySprint, false);
                 aimAtFast(p, c);
-                key(mc, mc.options.keyAttack, facing(p, c, 30f));   // swing once pointed at it
+                boolean onCane = mc.hitResult instanceof BlockHitResult bhr
+                    && mc.level.getBlockState(bhr.getBlockPos()).is(Blocks.SUGAR_CANE);
+                key(mc, mc.options.keyAttack, onCane);
             } else {
                 // route to it (A* around walls / up steps — no straight-line spinning)
                 key(mc, mc.options.keyAttack, false);
@@ -1965,14 +1968,29 @@ public final class Autopilot {
             return;
         }
 
-        // this floor is clear — head toward cane on ANOTHER floor (up OR down). A* routes to
-        // the base of the staircase at our level, around walls, then climbs/descends it.
-        BlockPos other = nearestHarvestCane(mc, feet, 32, -12, 18);
-        if (other != null) {
-            farmPathTo(mc, feet, other);
+        // this floor is clear — PATROL floors directionally so it reaches EVERY level.
+        // Going up: only chase cane on higher floors (so regrown cane below can't drag it
+        // back down and trap it bouncing 1<->2). At the top, flip to down; at the bottom,
+        // flip to up. This walks 1→2→3→4→3→2→1→… forever.
+        BlockPos nextUp = nearestHarvestCane(mc, feet, 40, 2, 40);     // any higher floor
+        BlockPos nextDown = nearestHarvestCane(mc, feet, 40, -40, -2); // any lower floor
+        if (farmGoingUp) {
+            if (nextUp != null) {
+                farmPathTo(mc, feet, nextUp);
+                return;
+            }
+            farmGoingUp = false;                 // nothing higher — head back down
+        }
+        if (nextDown != null) {
+            farmPathTo(mc, feet, nextDown);
             return;
         }
-        // truly no cane anywhere in range — fall back to ladder, else roam
+        farmGoingUp = true;                       // nothing lower — head back up
+        if (nextUp != null) {
+            farmPathTo(mc, feet, nextUp);
+            return;
+        }
+        // no cane on any floor right now — hold near a ladder/roam, waiting for regrowth
         BlockPos lad = nearestLadder(mc, 8, true);
         if (lad != null) {
             climbLadder(mc, lad, true);
@@ -2118,9 +2136,13 @@ public final class Autopilot {
             yaw += leftOpen ? -50f : 50f;
         }
         aim(p, yaw, up ? -6f : 6f);   // eased, smooth turn
-        key(mc, mc.options.keyUp, true);
         key(mc, mc.options.keySprint, false);
         BlockPos ahead = feet.relative(Direction.fromYRot(yaw));
+        // EDGE GUARD: don't walk off a 2+ block drop (that's the "fall off the edge and
+        // climb back" loop). A single step down (descending a floor) is fine.
+        boolean cliff = !up && passable(mc, ahead) && passable(mc, ahead.below())
+            && passable(mc, ahead.below().below());
+        key(mc, mc.options.keyUp, !cliff);
         // jump ONLY to climb a real step or a ladder — never bob in the water channels
         key(mc, mc.options.keyJump, up || (solidStep(mc, ahead) && !p.isInWater()));
     }
