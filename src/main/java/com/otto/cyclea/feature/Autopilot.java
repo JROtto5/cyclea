@@ -85,6 +85,11 @@ public final class Autopilot {
     private int climbTicks = 0;               // how long we've been climbing out of a dip
     private Direction climbDir = null;        // fixed stair-up direction while climbing
     private Boolean savedAutoJump = null;     // user's auto-jump setting, restored after a climb
+    // AFK support: while running we stop MC from throttling FPS / pausing when the window
+    // loses focus, so you can alt-tab to other screens and it keeps mining full speed.
+    // Both are saved on engage and restored on stop — we never leave your settings changed.
+    private net.minecraft.client.InactivityFpsLimit savedInactivityFps = null;
+    private Boolean savedPauseOnLostFocus = null;
     private int pillarTicks = 0;              // how long the current pillar-up has been running
     private int jumpTicks = 0;
     private double blocksTraveled = 0;    // session stats
@@ -486,6 +491,7 @@ public final class Autopilot {
             mc.options.autoJump().set(savedAutoJump);   // never leave auto-jump flipped
             savedAutoJump = null;
         }
+        restoreAfkSettings(mc);   // give back your focus/FPS settings exactly as they were
         // log this as a hand-off to the human, categorized
         takeovers++;
         lastStopReason = stripCodes(reason);
@@ -526,6 +532,36 @@ public final class Autopilot {
         } else {
             CycleaState.get().flashAlert("⛏ BOXED IN — stopped", 0xFFFF8020, 6000);
             stop(mc, "§6boxed in by hazards (no safe escape) — stopped so I don't grind forever");
+        }
+    }
+
+    /**
+     * Force AFK-friendly client settings while mining so you can leave it running and use
+     * other windows: don't drop FPS after you stop touching the mouse/keyboard (only when
+     * truly minimized), and don't pause on lost focus. Originals are captured once per run
+     * and put back in {@link #stop}. Cheap + idempotent — the null guards make it a no-op
+     * after the first tick.
+     */
+    private void applyAfkSettings(Minecraft mc) {
+        if (savedPauseOnLostFocus == null) {
+            savedPauseOnLostFocus = mc.options.pauseOnLostFocus;
+            mc.options.pauseOnLostFocus = false;
+        }
+        if (savedInactivityFps == null) {
+            savedInactivityFps = mc.options.inactivityFpsLimit().get();
+            mc.options.inactivityFpsLimit().set(net.minecraft.client.InactivityFpsLimit.MINIMIZED);
+        }
+    }
+
+    /** Put the user's focus/FPS settings back exactly as they were. */
+    private void restoreAfkSettings(Minecraft mc) {
+        if (savedPauseOnLostFocus != null) {
+            mc.options.pauseOnLostFocus = savedPauseOnLostFocus;
+            savedPauseOnLostFocus = null;
+        }
+        if (savedInactivityFps != null) {
+            mc.options.inactivityFpsLimit().set(savedInactivityFps);
+            savedInactivityFps = null;
         }
     }
 
@@ -587,6 +623,7 @@ public final class Autopilot {
         if (!active) {
             return;
         }
+        applyAfkSettings(mc);   // keep FPS up / no focus-pause so you can multitask on other screens
         // SELLING: if we're mid-way through operating the server's /sell GUI, do only
         // that (the player is in a menu; normal driving + the watchdog must stand down).
         if (sellState != 0) {
