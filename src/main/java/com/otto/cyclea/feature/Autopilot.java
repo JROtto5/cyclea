@@ -86,7 +86,8 @@ public final class Autopilot {
     private Direction climbDir = null;        // fixed stair-up direction while climbing
     private int climbLastY = Integer.MIN_VALUE;   // highest feet-Y reached this climb (progress tracker)
     private int climbStall = 0;               // ticks since we last gained height while climbing
-    private Boolean savedAutoJump = null;     // user's auto-jump setting, restored after a climb
+    private Boolean savedAutoJump = null;     // auto-jump state saved around a stair-climb
+    private Boolean savedRunAutoJump = null;  // user's real auto-jump, forced OFF for the whole run
     // AFK support: while running we stop MC from throttling FPS / pausing when the window
     // loses focus, so you can alt-tab to other screens and it keeps mining full speed.
     // Both are saved on engage and restored on stop — we never leave your settings changed.
@@ -574,9 +575,17 @@ public final class Autopilot {
             savedInactivityFps = mc.options.inactivityFpsLimit().get();
             mc.options.inactivityFpsLimit().set(net.minecraft.client.InactivityFpsLimit.MINIMIZED);
         }
+        // Force auto-jump OFF for the whole run. With it on, walking up to an ore makes vanilla
+        // hop the player, which knocks the aim off the block and RESETS mining progress every
+        // hop — the "auto-jump like crazy, never finishes the block" problem. The stair-climb
+        // branch flips it back on only while it actually needs to mount steps.
+        if (savedRunAutoJump == null) {
+            savedRunAutoJump = mc.options.autoJump().get();
+            mc.options.autoJump().set(Boolean.FALSE);
+        }
     }
 
-    /** Put the user's focus/FPS settings back exactly as they were. */
+    /** Put the user's focus/FPS/auto-jump settings back exactly as they were. */
     private void restoreAfkSettings(Minecraft mc) {
         if (savedPauseOnLostFocus != null) {
             mc.options.pauseOnLostFocus = savedPauseOnLostFocus;
@@ -585,6 +594,10 @@ public final class Autopilot {
         if (savedInactivityFps != null) {
             mc.options.inactivityFpsLimit().set(savedInactivityFps);
             savedInactivityFps = null;
+        }
+        if (savedRunAutoJump != null) {
+            mc.options.autoJump().set(savedRunAutoJump);
+            savedRunAutoJump = null;
         }
     }
 
@@ -967,6 +980,32 @@ public final class Autopilot {
             if (savedAutoJump == null) {
                 savedAutoJump = mc.options.autoJump().get();
                 mc.options.autoJump().set(Boolean.TRUE);
+            }
+
+            // CALM ORE GRAB while below target: the climb branch returns every tick, so without
+            // this it would blindly stair back up to Y-59 and IGNORE any ore right beside it (the
+            // very ore it dipped down for) — then the stall watchdog would read that time as
+            // "stuck" and bail home. Instead: count the block we just broke, then if a wanted ore
+            // is adjacent, mine it and treat it as progress (reset the stall) so we stay calm and
+            // clear the vein before continuing the climb. adjacentOre already refuses to reach
+            // below Y-60, so this never digs into bedrock.
+            if (pendingOre != null && mc.level.getBlockState(pendingOre).isAir()) {
+                oresMined++;
+                CycleaLedger.get().record(pendingOreType);
+                pendingOre = null;
+                pendingOreType = "";
+                climbStall = 0;
+            }
+            BlockPos climbOre = adjacentOre(mc, feetC);
+            if (climbOre != null && canMine(mc, climbOre)) {
+                climbStall = 0;   // productively mining, not deadlocked — don't let the watchdog panic
+                if (!climbOre.equals(pendingOre)) {
+                    pendingOre = climbOre;
+                    pendingOreType = CycleaLedger.classify(itemPathBlock(mc, climbOre));
+                }
+                mining = climbOre;
+                swingAt(mc, climbOre);
+                return;
             }
 
             // CLIMB WATCHDOG — the only safety net down here. The frozen-restart guard and the
