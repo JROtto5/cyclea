@@ -74,6 +74,10 @@ public class CycleaHud implements HudElement {
             g.text(font, "§b⛏ " + ap.getOresMined() + " ores  §7(" + ap.getOresPerHour()
                 + "/hr)" + (ap.getRestarts() > 0 ? "  §8self-fixed ×" + ap.getRestarts() : ""),
                 x, y + 84, 0xFF80D0FF, true);
+            com.otto.cyclea.feature.CycleaLedger led = com.otto.cyclea.feature.CycleaLedger.get();
+            String top = led.topEarner();
+            g.text(font, "§a$ " + led.sessionValue() + "  §7(" + led.valuePerHour() + "/hr)"
+                + (top.isEmpty() ? "" : "  §8top " + top), x, y + 96, 0xFF80FFA0, true);
         } else if (ap.getTakeovers() > 0) {
             // assist metrics: how much you've had to step in
             g.text(font, "§7You: " + ap.getTakeovers() + " takeovers, "

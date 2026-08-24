@@ -100,6 +100,7 @@ public final class Autopilot {
     private double lastZ = Double.NaN;
     private int oresMined = 0;            // ores dug this run (for the ores/hr metric)
     private BlockPos pendingOre = null;   // an ore we're breaking; counted when it turns to air
+    private String pendingOreType = "";   // its canonical ledger key, captured before it breaks
     private double lastTorchDist = 0;     // auto-torch spacing (by distance travelled)
 
     public int getOresMined() {
@@ -451,6 +452,8 @@ public final class Autopilot {
         surfDetourTicks = 0;
         alertedStashes.clear();
         pendingOre = null;
+        pendingOreType = "";
+        CycleaLedger.get().resetSession();   // fresh profit tally for this run
         sellCd = 0;
         sellState = 0;
         sellWaitTicks = 0;
@@ -474,6 +477,7 @@ public final class Autopilot {
             mc.mouseHandler.grabMouse();
         }
         restoreVsync(mc);         // give VSync back if own-mouse mode had dropped it
+        CycleaLedger.get().flush();   // persist all-time earnings before we hand off
         // log this as a hand-off to the human, categorized
         takeovers++;
         lastStopReason = stripCodes(reason);
@@ -486,7 +490,8 @@ public final class Autopilot {
             + " §8(handoff #" + takeovers + ")");
         if (oresMined > 0 || blocksTraveled > 5) {
             say(mc, "§8   run so far: §7" + getBlocksTraveled() + "m, §b" + oresMined
-                + " ores §7(" + getOresPerHour() + "/hr), §7" + (getSessionSeconds() / 60) + "m active"
+                + " ores §7(" + getOresPerHour() + "/hr), §a$" + CycleaLedger.get().sessionValue()
+                + " §7(" + CycleaLedger.get().valuePerHour() + "/hr), " + (getSessionSeconds() / 60) + "m active"
                 + (restartCount > 0 ? " §8· self-recovered ×" + restartCount : ""));
         }
     }
@@ -1388,7 +1393,9 @@ public final class Autopilot {
         // count ores as they finish breaking (ores/hr metric)
         if (pendingOre != null && mc.level.getBlockState(pendingOre).isAir()) {
             oresMined++;
+            CycleaLedger.get().record(pendingOreType);   // profit ledger
             pendingOre = null;
+            pendingOreType = "";
         }
 
         // TOP PRIORITY: clear anything that fell/exists in our own head or feet
@@ -1410,6 +1417,7 @@ public final class Autopilot {
         BlockPos target = adjacentOre(mc, feet);
         if (target != null) {
             pendingOre = target;   // it's a wanted ore — count it once it breaks
+            pendingOreType = CycleaLedger.classify(itemPathBlock(mc, target));
         }
 
         // if we've sunk below the target depth (e.g. wedged at Y-60 in the bedrock
@@ -2726,6 +2734,28 @@ public final class Autopilot {
 
     private static void key(Minecraft mc, net.minecraft.client.KeyMapping km, boolean down) {
         km.setDown(down);
+    }
+
+    /** Print the profit ledger to chat (/cyc stats) — always shown, even in Quiet Mode. */
+    public void printStats(Minecraft mc) {
+        CycleaLedger led = CycleaLedger.get();
+        long s = led.sessionSeconds();
+        sayAlways(mc, "§6§l⛏ Cyclea Ledger");
+        sayAlways(mc, "§7this run: §a$" + led.sessionValue() + " §7from §b" + led.sessionCount()
+            + " ores §7in §f" + (s / 60) + "m" + (s % 60) + "s  §7→ §a$" + led.valuePerHour() + "/hr");
+        List<String> rows = led.sessionBreakdown();
+        if (rows.isEmpty()) {
+            sayAlways(mc, "§8   (nothing mined yet this run)");
+        } else {
+            for (String r : rows) {
+                sayAlways(mc, "§8   " + r);
+            }
+        }
+        String vein = led.bestVein();
+        if (!vein.isEmpty()) {
+            sayAlways(mc, "§7best vein: §d" + vein);
+        }
+        sayAlways(mc, "§7all-time: §a$" + led.allTimeValue() + " §8(edit prices in cyclea-ledger.properties)");
     }
 
     /** Routine status chatter — suppressed in Quiet Mode so you don't get spammed while AFK. */

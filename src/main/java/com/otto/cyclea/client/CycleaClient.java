@@ -124,6 +124,11 @@ public class CycleaClient implements ClientModInitializer {
                     .executes(ctx -> {
                         Autopilot.get().stop(Minecraft.getInstance(), "§7stopped by /cyc stop");
                         return 1;
+                    }))
+                .then(ClientCommands.literal("stats")
+                    .executes(ctx -> {
+                        Autopilot.get().printStats(Minecraft.getInstance());
+                        return 1;
                     }))));
 
         loadPriorFinds();
