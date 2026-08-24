@@ -313,13 +313,14 @@ public class CycleaClient implements ClientModInitializer {
             mc.setScreenAndShow(new CycleaConfigScreen());
         }
         while (freeCursorKey.consumeClick()) {
-            // Free the cursor WITHOUT opening a menu — so you can use other monitors/apps while
-            // it keeps mining. Unlike ESC this opens no screen, so singleplayer never pauses.
-            if (mc.mouseHandler.isMouseGrabbed()) {
-                mc.mouseHandler.releaseMouse();
+            // OWN-MOUSE MODE: free the physical cursor for your other monitors/apps, but keep MC's
+            // internal grab flag ON so mining never stops. Unlike ESC this opens no screen, so
+            // singleplayer never pauses; unlike a plain releaseMouse() the game keeps breaking
+            // blocks (it refuses to when it thinks it's ungrabbed). Toggle again to recapture.
+            boolean on = Autopilot.get().toggleOwnMouse(mc);
+            if (on) {
                 say(mc, "§b🖱 cursor freed §7— use other screens; it keeps mining. §8[U] again to recapture");
             } else {
-                mc.mouseHandler.grabMouse();
                 say(mc, "§b🖱 cursor recaptured");
             }
         }

@@ -496,6 +496,10 @@ public final class Autopilot {
             savedAutoJump = null;
         }
         restoreAfkSettings(mc);   // give back your focus/FPS settings exactly as they were
+        if (ownMouse) {           // hand the cursor back to you when the bot stops
+            ownMouse = false;
+            mc.mouseHandler.grabMouse();
+        }
         // log this as a hand-off to the human, categorized
         takeovers++;
         lastStopReason = stripCodes(reason);
@@ -658,11 +662,16 @@ public final class Autopilot {
                 stop(mc, "internal error (safe halt)");
             }
         }
-        // KEEP RUNNING WITH MENUS OPEN / TABBED OUT: when a screen is open the game stops
-        // feeding key-presses to the player, so mirror the bot's intended movement straight
-        // into the player input and drive block-breaking directly. Lets you hit ESC, free
-        // the cursor, and switch apps while it keeps mining (on a server — singleplayer
-        // still pauses the world at the ESC menu).
+        // OWN-MOUSE MODE: keep MC's internal mouse-grab flag ON (so it mines normally) while the
+        // real OS cursor is freed for your other monitors. Re-asserted every tick so nothing
+        // re-locks the cursor mid-run. See toggleOwnMouse().
+        if (active && ownMouse) {
+            maintainOwnMouse(mc);
+        }
+        // KEEP RUNNING WITH MENUS OPEN: on a SERVER, hitting ESC opens a screen and the game
+        // stops feeding key-presses to the player, so mirror the bot's movement into the player
+        // input and drive block-breaking directly. (Singleplayer still pauses at the ESC menu —
+        // that's what own-mouse mode above is for.)
         if (active && mc.player != null && screenOpen(mc) && CycleaConfig.get().runWithMenus) {
             driveThroughMenu(mc);
         } else if (menuBreakPos != null) {
@@ -683,7 +692,54 @@ public final class Autopilot {
     }
 
     private BlockPos menuBreakPos = null;
+    private boolean ownMouse = false;          // free the OS cursor but keep MC's grab (bot's "own mouse")
     private static java.lang.reflect.Field screenField;
+    private static java.lang.reflect.Field grabbedField;
+
+    /** Whether the bot is currently holding its own mouse-grab (cursor freed for other screens). */
+    public boolean isOwnMouse() {
+        return ownMouse;
+    }
+
+    /**
+     * Toggle "own mouse" mode: free the physical cursor so you can use other monitors/apps, but
+     * keep Minecraft's internal mouse-grab flag ON so it still mines normally (the game refuses to
+     * break blocks when it thinks it doesn't own the mouse). Because the cursor lives on another
+     * screen, MC receives no mouse events, so there's no camera spin — it just keeps mining.
+     * Unlike ESC this opens no screen, so singleplayer never pauses.
+     */
+    public boolean toggleOwnMouse(Minecraft mc) {
+        ownMouse = !ownMouse;
+        if (ownMouse) {
+            maintainOwnMouse(mc);
+        } else {
+            mc.mouseHandler.grabMouse();   // recapture: back to normal play
+        }
+        return ownMouse;
+    }
+
+    /** Set MC's private mouseGrabbed flag without touching the OS cursor (reflection). */
+    private static void setGrabFlag(Minecraft mc, boolean grabbed) {
+        try {
+            if (grabbedField == null) {
+                grabbedField = net.minecraft.client.MouseHandler.class.getDeclaredField("mouseGrabbed");
+                grabbedField.setAccessible(true);
+            }
+            grabbedField.setBoolean(mc.mouseHandler, grabbed);
+        } catch (Throwable ignored) {
+            // if the field name ever changes, own-mouse simply no-ops — never crashes the bot
+        }
+    }
+
+    /** Free the OS cursor (so it can leave the window) yet keep MC believing it's grabbed. */
+    private void maintainOwnMouse(Minecraft mc) {
+        long window = mc.getWindow().handle();
+        // release the physical cursor to the desktop/other monitors...
+        org.lwjgl.glfw.GLFW.glfwSetInputMode(window, org.lwjgl.glfw.GLFW.GLFW_CURSOR,
+            org.lwjgl.glfw.GLFW.GLFW_CURSOR_NORMAL);
+        // ...but tell MC it still owns the mouse, so mining/attacking keeps working
+        setGrabFlag(mc, true);
+    }
 
     /** Is a GUI screen open? Read via reflection (the field is private in this build). */
     private static boolean screenOpen(Minecraft mc) {
