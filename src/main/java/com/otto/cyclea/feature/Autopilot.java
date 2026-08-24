@@ -1068,7 +1068,7 @@ public final class Autopilot {
             double odz = oreGoal.getZ() + 0.5 - player.getZ();
             double tdx = targetX - player.getX();
             double tdz = targetZ - player.getZ();
-            if (odx * tdx + odz * tdz < 0 && odx * odx + odz * odz > 4) {
+            if (odx * tdx + odz * tdz < 0 && odx * odx + odz * odz > 12) {
                 oreBlacklist.add(oreGoal.asLong());
                 oreGoal = null;
             } else if (++oreGoalTicks > 120) {         // ~6s chasing one ore = give up (wider reach)
@@ -1083,7 +1083,7 @@ public final class Autopilot {
                 oreGoalTicks = 0;
             }
         }
-        if (oreGoal == null && CycleaConfig.get().oreSeekLevel > 0 && ++oreScanTick >= 8) {
+        if (oreGoal == null && CycleaConfig.get().oreSeekLevel > 0 && ++oreScanTick >= 3) {
             oreScanTick = 0;
             oreGoal = findWantedOre(mc, player.blockPosition(), 7);   // wider reach into caves/tunnels
             if (oreGoal != null) {
@@ -2804,8 +2804,9 @@ public final class Autopilot {
                     continue;
                 }
                 for (int dz = -r; dz <= r; dz++) {
-                    // skip anything behind the travel direction (unless it's right beside us)
-                    if (dx * tdx + dz * tdz < 0 && dx * dx + dz * dz > 4) {
+                    // skip anything behind the travel direction (unless it's right beside us —
+                    // side-wall ore up to ~3 blocks back still gets grabbed, no far craning)
+                    if (dx * tdx + dz * tdz < 0 && dx * dx + dz * dz > 12) {
                         continue;
                     }
                     m.set(c.getX() + dx, c.getY() + dy, c.getZ() + dz);
