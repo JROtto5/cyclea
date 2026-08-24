@@ -154,6 +154,11 @@ public final class CycleaLedger {
         return n;
     }
 
+    /** How many of one ore key we've mined this run (0 if none) — e.g. sessionCountOf("diamond"). */
+    public int sessionCountOf(String key) {
+        return session.getOrDefault(key, 0);
+    }
+
     public long sessionSeconds() {
         return sessionStartMs == 0 ? 0 : (System.currentTimeMillis() - sessionStartMs) / 1000;
     }

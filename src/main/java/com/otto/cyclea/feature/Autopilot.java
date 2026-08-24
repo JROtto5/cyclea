@@ -238,6 +238,7 @@ public final class Autopilot {
         CycleaConfig c = CycleaConfig.get();
         c.mode = 0;
         c.oreSeekLevel = 3;    // ALL ores — diamond, redstone, gold, iron, lapis, coal, copper…
+        c.diamondFocus = false;
         c.baseScan = true;     // keep scanning so bases still get marked on the map
         c.onFindLevel = 0;     // pin them, but keep mining — never chase
         c.save();
@@ -258,6 +259,7 @@ public final class Autopilot {
         CycleaConfig c = CycleaConfig.get();
         c.mode = 0;
         c.oreSeekLevel = 2;    // rare + XP ores: diamond, redstone, gold, emerald, lapis, quartz
+        c.diamondFocus = false;
         c.baseScan = true;
         c.onFindLevel = 0;
         c.glanceLevel = 0;     // no idle look-around — calmer screen
@@ -272,6 +274,36 @@ public final class Autopilot {
             retarget(mc);
         }
         say(mc, "§6[Autopilot] §a$$ MINE MONEY §7— diamond/redstone/gold @ Y-59, smooth & steady");
+    }
+
+    /** DIAMONDS: the diamond optimizer (Epic 4). Drops to the diamond peak (Y-59 in the
+     *  overworld), laser-focuses ore-seek on diamonds + emerald + ancient debris only (skips
+     *  the low-value stuff), whole-veins every cluster it hits (Vein Brain), and auto-swaps a
+     *  Fortune pickaxe in for the drops. The single best "just get me diamonds" run. */
+    public void startDiamonds(Minecraft mc) {
+        CycleaConfig c = CycleaConfig.get();
+        c.mode = 0;
+        c.oreSeekLevel = 2;      // base tier; diamondFocus narrows wantsOre() to the prizes
+        c.diamondFocus = true;
+        c.veinMine = true;       // make sure whole-vein + Fortune-pick are on for the run
+        c.baseScan = true;
+        c.onFindLevel = 0;
+        c.glanceLevel = 0;
+        c.turnLevel = 1;
+        c.paceLevel = 1;
+        c.save();
+        if (!active) {
+            active = true;
+            resetRunState();
+            CycleaState.get().setActive(true);
+            targetY = depthForDimension(mc);
+            retarget(mc);
+        } else {
+            targetY = depthForDimension(mc);   // already running → re-tune depth to the diamond band
+        }
+        int have = CycleaLedger.get().sessionCountOf("diamond");
+        say(mc, "§6[Autopilot] §b💎 DIAMONDS §7— locked to Y" + targetY
+            + ", Fortune pick, chasing diamonds only" + (have > 0 ? " §7(session: §b" + have + "§7)" : ""));
     }
 
     /** Clear a custom destination and head back to spawn. */

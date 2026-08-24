@@ -31,6 +31,9 @@ public final class CycleaConfig {
     public int chestMaxY = 20;
     // 0 = off, 1 = diamonds+debris, 2 = + emerald/gold, 3 = all ores
     public int oreSeekLevel = 1;
+    // Diamond focus (set by /cyc diamonds): laser onto diamonds + ancient_debris + emerald only,
+    // ignoring low-value ore, so a diamond run doesn't waste time detouring for coal/iron.
+    public boolean diamondFocus = false;
     // place a trapdoor ceiling in the tunnel (1×1 sprint-lane trick); needs trapdoors in the hotbar
     public boolean oneByOne = false;
     // 0 = fast (every tick), 1 = normal (every 2), 2 = slow (every 3) — pace vs the server
@@ -327,6 +330,10 @@ public final class CycleaConfig {
         if (!ore) {
             return false;
         }
+        if (diamondFocus) {
+            // diamond run: only the top prizes are worth a detour
+            return path.contains("diamond") || path.equals("ancient_debris") || path.contains("emerald");
+        }
         if (oreSeekLevel >= 3) {
             return true;
         }
@@ -442,6 +449,7 @@ public final class CycleaConfig {
                 sweepStep = Integer.parseInt(p.getProperty("sweepStep", "48"));
                 chestMaxY = Integer.parseInt(p.getProperty("chestMaxY", "20"));
                 oreSeekLevel = Integer.parseInt(p.getProperty("oreSeekLevel", "1"));
+                diamondFocus = Boolean.parseBoolean(p.getProperty("diamondFocus", "false"));
                 oneByOne = Boolean.parseBoolean(p.getProperty("oneByOne", "false"));
                 paceLevel = Integer.parseInt(p.getProperty("paceLevel", "1"));
                 toolGuard = Integer.parseInt(p.getProperty("toolGuard", "1"));
@@ -478,6 +486,7 @@ public final class CycleaConfig {
         p.setProperty("sweepStep", Integer.toString(sweepStep));
         p.setProperty("chestMaxY", Integer.toString(chestMaxY));
         p.setProperty("oreSeekLevel", Integer.toString(oreSeekLevel));
+        p.setProperty("diamondFocus", Boolean.toString(diamondFocus));
         p.setProperty("oneByOne", Boolean.toString(oneByOne));
         p.setProperty("paceLevel", Integer.toString(paceLevel));
         p.setProperty("toolGuard", Integer.toString(toolGuard));
