@@ -61,6 +61,7 @@ public class CycleaConfigScreen extends Screen {
         addRow(runMenusMsg(), b -> { c.cycleRunWithMenus(); b.setMessage(runMenusMsg()); });
         addRow(quietMsg(), b -> { c.cycleQuiet(); b.setMessage(quietMsg()); });
         addRow(supplyMsg(), b -> { c.cycleSupplyShulker(); b.setMessage(supplyMsg()); });
+        addRow(veinMsg(), b -> { c.cycleVeinMine(); b.setMessage(veinMsg()); });
         addRow(turnMsg(), b -> { c.cycleTurn(); b.setMessage(turnMsg()); });
         addRow(glanceMsg(), b -> { c.cycleGlance(); b.setMessage(glanceMsg()); });
         addRow(sweepMsg(), b -> { c.cycleSweepStep(); b.setMessage(sweepMsg()); });
@@ -155,6 +156,10 @@ public class CycleaConfigScreen extends Screen {
 
     private Component supplyMsg() {
         return Component.literal("Supply shulker: " + CycleaConfig.get().supplyShulkerLabel());
+    }
+
+    private Component veinMsg() {
+        return Component.literal("Vein Brain: " + CycleaConfig.get().veinMineLabel());
     }
 
     private Component turnMsg() {

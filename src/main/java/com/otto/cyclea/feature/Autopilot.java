@@ -1416,8 +1416,20 @@ public final class Autopilot {
         if (pendingOre != null && mc.level.getBlockState(pendingOre).isAir()) {
             oresMined++;
             CycleaLedger.get().record(pendingOreType);   // profit ledger
+            BlockPos justBroke = pendingOre;
             pendingOre = null;
             pendingOreType = "";
+            // VEIN BRAIN (Epic 3): breaking that ore just exposed its neighbours — if any are
+            // also wanted ore, lock onto the nearest and chew the whole vein out before drifting
+            // back to the strip line. Unlike the periodic scan, this follows the vein in EVERY
+            // direction (even behind us), so no diamond in a cluster gets left in the wall.
+            if (CycleaConfig.get().veinMine && CycleaConfig.get().oreSeekLevel > 0 && oreGoal == null) {
+                BlockPos next = veinNeighbor(mc, justBroke);
+                if (next != null) {
+                    oreGoal = next;
+                    oreGoalTicks = 0;
+                }
+            }
         }
 
         // TOP PRIORITY: clear anything that fell/exists in our own head or feet
@@ -2877,6 +2889,39 @@ public final class Autopilot {
         return best;
     }
 
+    /**
+     * Vein-follow (Epic 3): the nearest wanted ore in the 5×5×5 around a block we just broke,
+     * with NO forward-only filter — once we've committed to a vein we chase it in every
+     * direction so a whole diamond/redstone cluster comes out, not just the blocks ahead.
+     * Still refuses to dive below the mining band (bedrock zone) or toward a hazard.
+     */
+    private BlockPos veinNeighbor(Minecraft mc, BlockPos center) {
+        BlockPos best = null;
+        double bestD = Double.MAX_VALUE;
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dy = -2; dy <= 2; dy++) {
+                for (int dz = -2; dz <= 2; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) {
+                        continue;
+                    }
+                    m.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
+                    if (m.getY() < targetY - 1 || oreBlacklist.contains(m.asLong())) {
+                        continue;   // don't chase a vein down into bedrock, or a given-up ore
+                    }
+                    if (wantedOre(mc, m) && isExposed(mc, m) && !hasHazardNeighbor(mc, m)) {
+                        double d = dx * dx + dy * dy + dz * dz;
+                        if (d < bestD) {
+                            bestD = d;
+                            best = m.immutable();
+                        }
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
     /** An ore is "visible" if at least one of its faces is open to air. */
     private static boolean isExposed(Minecraft mc, BlockPos p) {
         for (Direction d : Direction.values()) {
@@ -2903,10 +2948,56 @@ public final class Autopilot {
             || p.contains("crafting_table") || p.contains("mushroom_block");
     }
 
-    /** Pick the right tool: shovel for soft ground, axe for wood, pickaxe otherwise. */
+    /** Ores whose RAW drops Fortune multiplies — worth swapping the Fortune pick in for.
+     *  (Iron/gold/netherite drop a fixed amount, so Fortune does nothing there — excluded.) */
+    private static final java.util.Set<String> FORTUNE_ORE_KEYS = java.util.Set.of(
+        "diamond", "redstone", "lapis", "coal", "copper", "emerald", "quartz");
+
+    /** Does breaking this block benefit from a Fortune pickaxe? */
+    private static boolean benefitsFromFortune(BlockState st) {
+        String p = BuiltInRegistries.BLOCK.getKey(st.getBlock()).getPath();
+        if (!p.endsWith("_ore")) {
+            return false;
+        }
+        for (String k : FORTUNE_ORE_KEYS) {
+            if (p.contains(k)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** True if this pickaxe carries any level of Fortune. */
+    private static boolean hasFortune(ItemStack s) {
+        if (s.isEmpty()) {
+            return false;
+        }
+        var ench = s.get(DataComponents.ENCHANTMENTS);
+        if (ench == null) {
+            return false;
+        }
+        for (var holder : ench.keySet()) {
+            if (holder.getRegisteredName().endsWith("fortune") && ench.getLevel(holder) > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Pick the right tool: shovel for soft ground, axe for wood, pickaxe otherwise.
+     *  For Fortune-able ores, prefer a healthy Fortune pickaxe if one's in the hotbar. */
     private void selectToolFor(Minecraft mc, BlockState st) {
         Inventory inv = mc.player.getInventory();
         String want = isShovelBlock(st) ? "shovel" : isAxeBlock(st) ? "axe" : "pickaxe";
+        if (want.equals("pickaxe") && CycleaConfig.get().veinMine && benefitsFromFortune(st)) {
+            int f = findHotbar(inv, s -> isPickaxe(s) && !nearlyBroken(s) && hasFortune(s));
+            if (f >= 0) {
+                if (f != inv.getSelectedSlot()) {
+                    inv.setSelectedSlot(f);
+                }
+                return;
+            }
+        }
         int slot = findHotbar(inv, s -> tool(s, want) && !nearlyBroken(s));
         if (slot < 0 && !want.equals("pickaxe")) {
             slot = findHotbar(inv, s -> tool(s, "pickaxe") && !nearlyBroken(s));   // fallback

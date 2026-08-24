@@ -25,13 +25,10 @@ import java.util.TreeMap;
  */
 public final class CycleaLedger {
 
-    private static final CycleaLedger INSTANCE = new CycleaLedger();
-
-    public static CycleaLedger get() {
-        return INSTANCE;
-    }
-
-    /** Default per-block sell value (emeralds / $). Tunable via cyclea-ledger.properties. */
+    /** Default per-block sell value (emeralds / $). Tunable via cyclea-ledger.properties.
+     *  MUST be declared + populated BEFORE {@link #INSTANCE}: the constructor copies it, so if
+     *  INSTANCE initialized first it would copy a null map and the whole class fails to load
+     *  (NoClassDefFoundError → /cyc minemoney crash). Order here is load-bearing. */
     private static final Map<String, Integer> DEFAULT_PRICES = new LinkedHashMap<>();
     static {
         DEFAULT_PRICES.put("netherite", 150);
@@ -44,6 +41,12 @@ public final class CycleaLedger {
         DEFAULT_PRICES.put("quartz", 4);
         DEFAULT_PRICES.put("copper", 3);
         DEFAULT_PRICES.put("coal", 2);
+    }
+
+    private static final CycleaLedger INSTANCE = new CycleaLedger();
+
+    public static CycleaLedger get() {
+        return INSTANCE;
     }
 
     private final Map<String, Integer> prices = new LinkedHashMap<>(DEFAULT_PRICES);

@@ -203,6 +203,20 @@ public final class CycleaConfig {
         return supplyShulker ? "On (auto-restock from a carried shulker)" : "Off";
     }
 
+    // Vein Brain: when the bot strikes ore, chew the WHOLE connected vein before returning
+    // to the strip line (follows it in every direction, even behind us), and auto-select a
+    // Fortune pickaxe for ores that Fortune multiplies. Default ON — pure efficiency.
+    public boolean veinMine = true;
+
+    public void cycleVeinMine() {
+        veinMine = !veinMine;
+        save();
+    }
+
+    public String veinMineLabel() {
+        return veinMine ? "On (whole-vein + Fortune pick)" : "Off";
+    }
+
     // Emergency escape: run a home/teleport command when about to die, hit hard, or a
     // player gets close. Loud alarm + banner. Default ON — it's a safety net.
     public boolean escapeHome = true;
@@ -436,6 +450,7 @@ public final class CycleaConfig {
                 runWithMenus = Boolean.parseBoolean(p.getProperty("runWithMenus", "true"));
                 quiet = Boolean.parseBoolean(p.getProperty("quiet", "false"));
                 supplyShulker = Boolean.parseBoolean(p.getProperty("supplyShulker", "true"));
+                veinMine = Boolean.parseBoolean(p.getProperty("veinMine", "true"));
                 watchman = Boolean.parseBoolean(p.getProperty("watchman", "true"));
                 oreEsp = Boolean.parseBoolean(p.getProperty("oreEsp", "true"));
                 tracers = Boolean.parseBoolean(p.getProperty("tracers", "true"));
@@ -471,6 +486,7 @@ public final class CycleaConfig {
         p.setProperty("runWithMenus", Boolean.toString(runWithMenus));
         p.setProperty("quiet", Boolean.toString(quiet));
         p.setProperty("supplyShulker", Boolean.toString(supplyShulker));
+        p.setProperty("veinMine", Boolean.toString(veinMine));
         p.setProperty("watchman", Boolean.toString(watchman));
         p.setProperty("oreEsp", Boolean.toString(oreEsp));
         p.setProperty("tracers", Boolean.toString(tracers));
