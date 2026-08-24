@@ -166,19 +166,43 @@ public class CycleaClient implements ClientModInitializer {
 
     private float prevHp = Float.NaN;
     private int homeCd = 0;
+    private int suffTicks = 0;   // consecutive ticks with head in a suffocating block
 
-    /** Emergency /home when about to die or hit hard. Fires regardless of the bot. */
+    /** Emergency /home when about to die or hit hard. Fires regardless of the bot.
+     *  Reacts to the HAZARD (lava / fire / suffocation), not just to HP already being low —
+     *  4 HP/tick lava and 1 HP/tick suffocation never trip a "big hit", and waiting for HP≤8
+     *  is too late when a server's /home warmup gets cancelled by the ongoing damage. */
     private void safety(Minecraft mc) {
         if (homeCd > 0) {
             homeCd--;
         }
-        if (mc.player == null) {
+        if (mc.player == null || mc.level == null) {
             prevHp = Float.NaN;
+            suffTicks = 0;
             return;
         }
         float hp = mc.player.getHealth();
+
+        // --- proactive hazard escape ------------------------------------
+        boolean inLava = mc.player.isInLava();
+        boolean onFire = mc.player.getRemainingFireTicks() > 0;
+        BlockPos eye = BlockPos.containing(mc.player.getEyePosition());
+        boolean headStuck = mc.level.getBlockState(eye).isSuffocating(mc.level, eye);
+        suffTicks = headStuck ? suffTicks + 1 : 0;
+
+        if (inLava) {
+            // rise toward air even if /home has a warmup — physical self-rescue buys time
+            mc.player.setJumping(true);
+        }
+
         if (CycleaConfig.get().escapeHome && homeCd == 0 && mc.player.isAlive()) {
-            if (hp <= 8f) {
+            if (inLava) {
+                fireHome(mc, "IN LAVA");
+            } else if (suffTicks >= 2) {
+                fireHome(mc, "suffocating");
+            } else if (onFire && hp <= 14f) {
+                fireHome(mc, "on fire, HP " + (int) hp);
+            } else if (hp <= 10f) {
                 fireHome(mc, "low HP " + (int) hp);
             } else if (!Float.isNaN(prevHp) && prevHp - hp >= 5f) {
                 fireHome(mc, "big hit −" + (int) (prevHp - hp));
