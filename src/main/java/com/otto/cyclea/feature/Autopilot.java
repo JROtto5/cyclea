@@ -952,6 +952,14 @@ public final class Autopilot {
             return;
         }
 
+        // 1b2.5) EAT — checked ABOVE the Y-60 climb so it can never be starved out. Eating is a
+        // multi-tick hold of right-click; if the bot dipped below target mid-bite (which the floor
+        // -ore grab now does often) the climb branch would take over and stop holding use, so the
+        // bite never finished and the steak went uneaten. Eating pauses, feeds, then resumes.
+        if (handleEating(mc)) {
+            return;
+        }
+
         // 1b3) Y-60 CLIMB — TOP PRIORITY. Getting back to the target depth beats everything.
         BlockPos feetC = player.blockPosition();
 
