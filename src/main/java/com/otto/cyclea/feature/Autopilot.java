@@ -75,6 +75,9 @@ public final class Autopilot {
     private double lastProgX = Double.NaN;   // anti-stuck progress tracking
     private double lastProgZ = Double.NaN;
     private int stuckTicks = 0;
+    private int stuckCycles = 0;             // full failed shake→tower→redirect cycles (boxed-in detector)
+    private double boxAnchorX = Double.NaN;   // where the boxed-in escalation began
+    private double boxAnchorZ = Double.NaN;
     private double idleX = Double.NaN;        // activity watchdog (catches any freeze)
     private double idleZ = Double.NaN;
     private int idleTicks = 0;
@@ -433,6 +436,9 @@ public final class Autopilot {
         lastProgX = Double.NaN;
         lastProgZ = Double.NaN;
         stuckTicks = 0;
+        stuckCycles = 0;
+        boxAnchorX = Double.NaN;
+        boxAnchorZ = Double.NaN;
         idleX = Double.NaN;
         idleZ = Double.NaN;
         idleTicks = 0;
@@ -494,6 +500,32 @@ public final class Autopilot {
             say(mc, "§8   run so far: §7" + getBlocksTraveled() + "m, §b" + oresMined
                 + " ores §7(" + getOresPerHour() + "/hr), §7" + (getSessionSeconds() / 60) + "m active"
                 + (restartCount > 0 ? " §8· self-recovered ×" + restartCount : ""));
+        }
+    }
+
+    /**
+     * Last resort when genuinely boxed in — e.g. a lava pocket where the flood-guard
+     * refuses every block, so the shake→tower→redirect ladder can't free us and would
+     * otherwise loop forever. Teleport home (the same escape as low-HP) and stop; if
+     * escape-home is off, just stop cleanly instead of grinding a wall for an hour.
+     */
+    private void escapeBoxedIn(Minecraft mc) {
+        stuckCycles = 0;
+        boxAnchorX = Double.NaN;
+        boxAnchorZ = Double.NaN;
+        if (CycleaConfig.get().escapeHome && mc.player != null) {
+            String cmd = CycleaConfig.get().homeCommand.replaceFirst("^/", "");
+            mc.player.connection.sendCommand(cmd);
+            CycleaState.get().flashAlert("⛏ BOXED IN — /" + CycleaConfig.get().homeCommand,
+                0xFFFF8020, 6000);
+            for (float pitch : new float[]{0.5f, 0.8f, 1.2f}) {
+                mc.player.playSound(net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, pitch);
+            }
+            stop(mc, "§6boxed in by hazards — ran §f/" + CycleaConfig.get().homeCommand
+                + " §6to get out; re-run to continue");
+        } else {
+            CycleaState.get().flashAlert("⛏ BOXED IN — stopped", 0xFFFF8020, 6000);
+            stop(mc, "§6boxed in by hazards (no safe escape) — stopped so I don't grind forever");
         }
     }
 
@@ -987,6 +1019,13 @@ public final class Autopilot {
             lastProgX = player.getX();
             lastProgZ = player.getZ();
             stuckTicks = 0;
+            // truly broke free of the pocket (5+ blocks from where we got boxed)? clear the cycle count
+            if (!Double.isNaN(boxAnchorX)
+                && Math.hypot(player.getX() - boxAnchorX, player.getZ() - boxAnchorZ) > 5) {
+                stuckCycles = 0;
+                boxAnchorX = Double.NaN;
+                boxAnchorZ = Double.NaN;
+            }
         } else {
             stuckTicks++;
         }
@@ -1019,6 +1058,17 @@ public final class Autopilot {
             detourTicks = 0;
             oreGoal = null;
             stuckTicks = 0;               // fresh attempt — never hard-stop
+            // count this failed escalation. Three in a row without escaping = genuinely
+            // boxed in (e.g. a lava pocket where every block is flood-guarded and can't
+            // be mined). Rather than loop forever, take the human way out: teleport home.
+            if (Double.isNaN(boxAnchorX)) {
+                boxAnchorX = player.getX();
+                boxAnchorZ = player.getZ();
+            }
+            if (++stuckCycles >= 3) {
+                escapeBoxedIn(mc);
+                return;
+            }
         }
         if (jumpTicks > 0) {
             key(mc, mc.options.keyJump, true);
