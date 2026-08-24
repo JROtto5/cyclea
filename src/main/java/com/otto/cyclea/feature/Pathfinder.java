@@ -3,7 +3,6 @@ package com.otto.cyclea.feature;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -36,28 +35,15 @@ public final class Pathfinder {
 
     /** @return a list of feet positions from near start to near goal, or null. */
     public static List<BlockPos> find(Minecraft mc, BlockPos start, BlockPos goal) {
-        return find(mc, start, goal, false);
-    }
-
-    /** Farm variant: carpets/cane/ladders are walk-through and carpet supports standing
-     *  (even over the water channels), so it routes across a sugarcane farm's walkways. */
-    public static List<BlockPos> findFarm(Minecraft mc, BlockPos start, BlockPos goal) {
-        return find(mc, start, goal, true);
-    }
-
-    private static List<BlockPos> find(Minecraft mc, BlockPos start, BlockPos goal, boolean farm) {
         if (mc.level == null) {
             return null;
         }
-        BlockPos from = grounded(mc, start, farm);
+        BlockPos from = grounded(mc, start);
         if (from == null) {
             return null;
         }
-        // Weighted A*: farms are big and open, so a plain heuristic flood-fills the floor
-        // and burns the budget before reaching the far staircase. A heavy weight makes it
-        // greedy — it beelines toward the goal, finds the stairs, and climbs within budget.
-        double weight = farm ? 2.5 : 1.0;
-        int budget = farm ? 30000 : MAX_NODES;
+        double weight = 1.0;
+        int budget = MAX_NODES;
 
         PriorityQueue<Node> open = new PriorityQueue<>((a, b) -> Double.compare(a.f, b.f));
         Map<Long, Double> best = new HashMap<>();
@@ -66,23 +52,16 @@ public final class Pathfinder {
         open.add(new Node(from, 0, weight * h(from, goal)));
         best.put(from.asLong(), 0.0);
         int expanded = 0;
-        BlockPos closest = from;
-        double closestH = h(from, goal);
 
         while (!open.isEmpty() && expanded++ < budget) {
             Node cur = open.poll();
             if (horizClose(cur.pos, goal, 2) && Math.abs(cur.pos.getY() - goal.getY()) <= 3) {
                 return reconstruct(came, cur.pos);
             }
-            double curH = h(cur.pos, goal);
-            if (curH < closestH) {          // track the best-so-far in case we run out
-                closestH = curH;
-                closest = cur.pos;
-            }
             for (Direction d : Direction.Plane.HORIZONTAL) {
                 for (int dy = -1; dy <= 1; dy++) {
                     BlockPos next = cur.pos.relative(d).above(dy);
-                    Double cost = stepCost(mc, cur.pos, next, d, dy, farm);
+                    Double cost = stepCost(mc, cur.pos, next, d, dy);
                     if (cost == null) {
                         continue;
                     }
@@ -96,30 +75,25 @@ public final class Pathfinder {
                 }
             }
         }
-        // out of budget: hand back a partial route toward the goal so it keeps progressing
-        // (walk to the closest point we found, then it re-plans from there)
-        if (farm && closest != from) {
-            return reconstruct(came, closest);
-        }
         return null;
     }
 
     /** Move cost from a to b (b = feet of the destination), or null if illegal. */
-    private static Double stepCost(Minecraft mc, BlockPos a, BlockPos b, Direction d, int dy, boolean farm) {
-        if (!standable(mc, b, farm)) {
+    private static Double stepCost(Minecraft mc, BlockPos a, BlockPos b, Direction d, int dy) {
+        if (!standable(mc, b)) {
             return null;
         }
         // must be able to occupy feet+head at b (mine if solid, never through hazards)
         double mine = 0;
-        Double f = enterCost(mc, b, farm);
-        Double h = enterCost(mc, b.above(), farm);
+        Double f = enterCost(mc, b);
+        Double h = enterCost(mc, b.above());
         if (f == null || h == null) {
             return null;
         }
         mine += f + h;
         // stepping up requires clearing the block above the current head too
         if (dy > 0) {
-            Double up = enterCost(mc, a.above(2), farm);
+            Double up = enterCost(mc, a.above(2));
             if (up == null) {
                 return null;
             }
@@ -129,19 +103,16 @@ public final class Pathfinder {
     }
 
     /** Cost to occupy a block (0 if already open, >0 if we must mine it), null if impossible. */
-    private static Double enterCost(Minecraft mc, BlockPos p, boolean farm) {
+    private static Double enterCost(Minecraft mc, BlockPos p) {
         BlockState st = mc.level.getBlockState(p);
         if (st.is(Blocks.LAVA) || st.is(Blocks.WATER)) {
             return null;
         }
-        if (passable(st, farm)) {
-            return 0.0;        // walk-through (incl. carpet/cane/ladder in farm mode) — no mining
+        if (passable(st)) {
+            return 0.0;        // walk-through — no mining
         }
         if (st.is(Blocks.BEDROCK) || st.is(Blocks.BARRIER) || st.is(Blocks.REINFORCED_DEEPSLATE)) {
             return null;   // unbreakable — route around
-        }
-        if (farm) {
-            return null;   // farms are non-destructive — never mine through structure
         }
         if (hasHazardNeighbor(mc, p)) {
             return null;   // mining it would flood
@@ -149,44 +120,25 @@ public final class Pathfinder {
         return 2.0;        // solid but safe to mine
     }
 
-    private static boolean standable(Minecraft mc, BlockPos feet, boolean farm) {
-        if (farm) {
-            // carpet/slab/etc. in the feet block supports standing — even over water
-            BlockState at = mc.level.getBlockState(feet);
-            if (!at.is(Blocks.WATER) && !at.is(Blocks.LAVA)
-                && !at.isCollisionShapeFullBlock(mc.level, feet)
-                && !at.getCollisionShape(mc.level, feet).isEmpty()) {
-                return true;
-            }
-        }
+    private static boolean standable(Minecraft mc, BlockPos feet) {
         BlockState below = mc.level.getBlockState(feet.below());
-        return !passable(below, farm) && !below.is(Blocks.LAVA) && !below.is(Blocks.WATER);
+        return !passable(below) && !below.is(Blocks.LAVA) && !below.is(Blocks.WATER);
     }
 
     /** Drop the start position down to the first solid floor so A* begins grounded. */
-    private static BlockPos grounded(Minecraft mc, BlockPos p, boolean farm) {
+    private static BlockPos grounded(Minecraft mc, BlockPos p) {
         for (int i = 0; i < 4; i++) {
-            if (standable(mc, p, farm)) {
+            if (standable(mc, p)) {
                 return p;
             }
             p = p.below();
         }
-        return standable(mc, p, farm) ? p : null;
+        return standable(mc, p) ? p : null;
     }
 
-    private static boolean passable(BlockState st, boolean farm) {
-        if (st.isAir() || st.is(Blocks.CAVE_AIR) || st.is(Blocks.VOID_AIR)
-            || st.is(Blocks.WATER) || st.is(Blocks.SHORT_GRASS) || st.is(Blocks.TALL_GRASS)) {
-            return true;
-        }
-        if (!farm) {
-            return false;
-        }
-        // farm walkways: carpets, cane, ladders, snow are all walk-through
-        if (st.is(Blocks.SUGAR_CANE) || st.is(Blocks.LADDER) || st.is(Blocks.SNOW)) {
-            return true;
-        }
-        return BuiltInRegistries.BLOCK.getKey(st.getBlock()).getPath().endsWith("carpet");
+    private static boolean passable(BlockState st) {
+        return st.isAir() || st.is(Blocks.CAVE_AIR) || st.is(Blocks.VOID_AIR)
+            || st.is(Blocks.WATER) || st.is(Blocks.SHORT_GRASS) || st.is(Blocks.TALL_GRASS);
     }
 
     private static boolean hasHazardNeighbor(Minecraft mc, BlockPos pos) {

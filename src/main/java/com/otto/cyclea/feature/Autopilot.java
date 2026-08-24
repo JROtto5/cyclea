@@ -273,21 +273,6 @@ public final class Autopilot {
         say(mc, "§6[Autopilot] §a$$ MINE MONEY §7— diamond/redstone/gold @ Y-59, smooth & steady");
     }
 
-    /** Sugarcane farm: harvest ready cane, climb ladders, sell the pile. */
-    public void startFarm(Minecraft mc) {
-        CycleaConfig c = CycleaConfig.get();
-        c.mode = 2;
-        c.save();
-        farmSelling = false;
-        farmWanderTicks = 0;
-        if (!active) {
-            active = true;
-            resetRunState();
-            CycleaState.get().setActive(true);
-        }
-        say(mc, "§6[Autopilot] §a🌾 SUGARCANE FARM §7— harvesting + auto-selling 24/7");
-    }
-
     /** Clear a custom destination and head back to spawn. */
     public void gotoSpawn(Minecraft mc) {
         hasGoto = false;
@@ -466,18 +451,6 @@ public final class Autopilot {
         surfDetourTicks = 0;
         alertedStashes.clear();
         pendingOre = null;
-        farmTarget = null;
-        farmFar = null;
-        farmActCd = 0;
-        farmScanCd = 0;
-        farmSeekY = Double.NaN;
-        farmSeekTicks = 0;
-        farmPath = null;
-        farmPathIdx = 0;
-        farmRepathCd = 0;
-        farmPathGoal = null;
-        farmStuckTicks = 0;
-        farmStuckX = Double.NaN;
         sellCd = 0;
         sellState = 0;
         sellWaitTicks = 0;
@@ -509,7 +482,7 @@ public final class Autopilot {
         lastStopMs = System.currentTimeMillis();
         lastStopPos = mc.player != null ? mc.player.blockPosition() : null;
         handedOff = true;
-        say(mc, "§6[Autopilot] §7stopped — " + reason
+        sayAlways(mc, "§6[Autopilot] §7stopped — " + reason
             + " §8(handoff #" + takeovers + ")");
         if (oresMined > 0 || blocksTraveled > 5) {
             say(mc, "§8   run so far: §7" + getBlocksTraveled() + "m, §b" + oresMined
@@ -911,11 +884,6 @@ public final class Autopilot {
         // 1b2) SURFACE SCOUT mode: walk on top, deep-scan for stashes, alert you.
         if (CycleaConfig.get().mode == 1) {
             surfaceStep(mc);
-            return;
-        }
-        // 1b2b) SUGARCANE FARM mode: harvest ready cane, climb ladders, sell the pile.
-        if (CycleaConfig.get().mode == 2) {
-            farmStep(mc);
             return;
         }
 
@@ -1895,7 +1863,6 @@ public final class Autopilot {
                 sellState = 2;
             } else if (++sellWaitTicks > 60) {
                 sellState = 0;   // never opened — step() will fall back to dumping
-                farmSelling = false;
                 say(mc, "§7sell menu didn't open — I'll dump instead");
             }
             return;
@@ -1904,7 +1871,6 @@ public final class Autopilot {
         var menu = player.containerMenu;
         if (menu == null || menu.containerId == 0) {
             sellState = 0;
-            farmSelling = false;
             return;
         }
         int buildStacks = 0;
@@ -1921,21 +1887,15 @@ public final class Autopilot {
                 continue;   // only shift OUR inventory items, not the sell slots
             }
             ItemStack s = slot.getItem();
-            // farm mode sells ONLY sugarcane; miner mode sells mined ores/stone
-            if (farmSelling) {
-                if (!itemPath(s).equals("sugar_cane")) {
-                    continue;
-                }
-            } else {
-                if (!isMined(s)) {
-                    continue;   // tools, food, emeralds (money), torches — leave them
-                }
-                if (BUILD.contains(itemPath(s)) && buildStacks <= 1) {
-                    continue;   // keep one building stack for pillaring/bridging
-                }
-                if (BUILD.contains(itemPath(s))) {
-                    buildStacks--;
-                }
+            // sell mined ores/stone; keep tools, food, emeralds (money), torches
+            if (!isMined(s)) {
+                continue;
+            }
+            if (BUILD.contains(itemPath(s)) && buildStacks <= 1) {
+                continue;   // keep one building stack for pillaring/bridging
+            }
+            if (BUILD.contains(itemPath(s))) {
+                buildStacks--;
             }
             mc.gameMode.handleContainerInput(menu.containerId, i, 0,
                 net.minecraft.world.inventory.ContainerInput.QUICK_MOVE, player);
@@ -1944,9 +1904,8 @@ public final class Autopilot {
         player.closeContainer();   // ESC → confirm the sale
         sellState = 0;
         sellCd = 60;               // ~3s before another sell
-        say(mc, "§a$ sold " + moved + (farmSelling ? " cane stack" : " mined stack")
+        sayAlways(mc, "§a$ sold " + moved + " mined stack"
             + (moved == 1 ? "" : "s") + " §7— back to work");
-        farmSelling = false;
     }
 
     private static String itemPath(ItemStack s) {
@@ -2011,451 +1970,6 @@ public final class Autopilot {
         return false;
     }
 
-    // ---------------- Sugarcane farm ----------------
-
-    private int farmWanderTicks = 0;
-    private Direction farmDir = Direction.NORTH;
-    private boolean farmSelling = false;
-    private boolean farmGoingUp = true;   // patrol direction: up to the top, then back down
-    private BlockPos farmTarget = null;   // the cane we're committed to cutting
-    private int farmActCd = 0;            // harvest pacing (~5/sec)
-    private int farmScanCd = 0;           // throttle the wide cane scan
-    private BlockPos farmFar = null;      // cached far cane target
-    private double farmSeekY = Double.NaN; // player Y when we started seeking the staircase
-    private int farmSeekTicks = 0;         // how long we've been climbing without progress
-    private java.util.List<BlockPos> farmPath = null;   // A* route to the target cane
-    private int farmPathIdx = 0;
-    private int farmRepathCd = 0;
-    private BlockPos farmPathGoal = null;
-    private int farmStuckTicks = 0;
-    private double farmStuckX = Double.NaN;
-    private double farmStuckZ = Double.NaN;
-    private String lastFarmStatus = "";
-
-    /** Debounced farm status to chat — only prints when the message changes. */
-    private void farmSay(Minecraft mc, String s) {
-        if (!s.equals(lastFarmStatus)) {
-            lastFarmStatus = s;
-            say(mc, "§8[farm] §7" + s);
-        }
-    }
-
-    /** A* route to {@code goal} (farm-aware: carpet/cane/ladders walkable, climbs ±1 steps),
-     *  followed node by node. Re-plans when consumed / the goal moved / on a timer. If it
-     *  can't route (or we stop making progress), it roams to reposition instead of spinning. */
-    private void farmPathTo(Minecraft mc, BlockPos feet, BlockPos goal) {
-        var p = mc.player;
-        // stuck detector: if we're not actually moving, force a re-plan / reposition
-        if (Double.isNaN(farmStuckX)
-            || Math.hypot(p.getX() - farmStuckX, p.getZ() - farmStuckZ) > 0.4) {
-            farmStuckX = p.getX();
-            farmStuckZ = p.getZ();
-            farmStuckTicks = 0;
-        } else {
-            farmStuckTicks++;
-        }
-        boolean stuck = farmStuckTicks > 30;
-
-        if (stuck || farmPath == null || farmPathIdx >= farmPath.size()
-            || farmPathGoal == null || farmPathGoal.distManhattan(goal) > 2
-            || --farmRepathCd <= 0) {
-            farmPath = Pathfinder.findFarm(mc, feet, goal);
-            farmPathGoal = goal;
-            farmPathIdx = 0;
-            farmRepathCd = 30;
-            farmSay(mc, "route→Y" + goal.getY() + ": "
-                + (farmPath == null ? "§cNO PATH" : farmPath.size() + " steps")
-                + (stuck ? " (was stuck)" : ""));
-            if (stuck) {
-                farmStuckTicks = 0;
-                if (farmPath == null) {
-                    wanderFarm(mc);   // no route + stuck → reposition, don't grind a wall
-                    return;
-                }
-            }
-        }
-        if (farmPath == null || farmPath.isEmpty()) {
-            wanderFarm(mc);
-            return;
-        }
-        // advance past every node we've already reached (skip, don't backtrack)
-        while (farmPathIdx < farmPath.size() - 1) {
-            BlockPos n = farmPath.get(farmPathIdx);
-            double dxN = n.getX() + 0.5 - p.getX();
-            double dzN = n.getZ() + 0.5 - p.getZ();
-            if (dxN * dxN + dzN * dzN < 0.75 && Math.abs(n.getY() - feet.getY()) <= 1) {
-                farmPathIdx++;
-            } else {
-                break;
-            }
-        }
-        if (farmPathIdx >= farmPath.size()) {
-            farmPath = null;
-            return;
-        }
-        BlockPos node = farmPath.get(farmPathIdx);
-        stepToward(mc, node.getX() + 0.5, node.getZ() + 0.5, node.getY());
-    }
-
-    /** Baritone-style node executor: face the node with a smooth turn, walk forward only
-     *  when roughly facing it (no sidestep = no spin), sprint on flat straights, and let
-     *  auto-jump climb steps (with an explicit hop when right at a higher step). */
-    private void stepToward(Minecraft mc, double cx, double cz, int nodeY) {
-        var p = mc.player;
-        double dx = cx - p.getX();
-        double dz = cz - p.getZ();
-        double dist = Math.hypot(dx, dz);
-        // ON the node already (horizontally): don't rotate toward a point under our feet —
-        // that's the yaw-jitter spin. Just settle (climb if this node is a step up).
-        if (dist < 0.6) {
-            key(mc, mc.options.keyUp, nodeY > p.blockPosition().getY());
-            key(mc, mc.options.keySprint, false);
-            key(mc, mc.options.keyJump, nodeY > p.blockPosition().getY());
-            return;
-        }
-        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-        aim(p, yaw, 0f);   // smooth, eased turn (human, not a snap)
-
-        double yawErr = Math.abs(Mth.degreesDifference(p.getYRot(), yaw));
-        boolean facing = yawErr < 35f;
-        int feetY = p.blockPosition().getY();
-        boolean climbing = nodeY > feetY;
-
-        key(mc, mc.options.keyUp, facing);
-        key(mc, mc.options.keySprint, facing && dist > 2.2 && !climbing && !p.isInWater());
-        // Baritone-style ascend timing: only jump when we're right at the step (<1.2),
-        // lined up with it (tight yaw), and won't bonk our head — otherwise auto-jump (on
-        // in farm mode) steps us up. Jumping early/misaligned was why it missed stairs.
-        boolean headClear = !mc.level.getBlockState(p.blockPosition().above(2)).blocksMotion();
-        boolean ascendHop = climbing && dist < 1.25 && yawErr < 22f && headClear;
-        key(mc, mc.options.keyJump, ascendHop || p.isInWater());
-    }
-
-    private BlockPos nearestStairs(Minecraft mc, int r) {
-        BlockPos feet = mc.player.blockPosition();
-        BlockPos best = null;
-        double bestD = Double.MAX_VALUE;
-        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
-        for (int dx = -r; dx <= r; dx++) {
-            for (int dy = -4; dy <= 4; dy++) {
-                for (int dz = -r; dz <= r; dz++) {
-                    m.set(feet.getX() + dx, feet.getY() + dy, feet.getZ() + dz);
-                    if (!BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(m).getBlock())
-                        .getPath().endsWith("_stairs")) {
-                        continue;
-                    }
-                    double d = dx * dx + dz * dz;
-                    if (d < bestD) {
-                        bestD = d;
-                        best = m.immutable();
-                    }
-                }
-            }
-        }
-        return best;
-    }
-
-    /** A cane segment worth cutting: it sits above the base AND its column is fully grown
-     *  (≥3 tall). Ignoring 1–2 tall regrowth is what stops it turning back and spinning. */
-    private boolean isCaneSegment(Minecraft mc, BlockPos pos) {
-        if (!mc.level.getBlockState(pos).is(Blocks.SUGAR_CANE)
-            || !mc.level.getBlockState(pos.below()).is(Blocks.SUGAR_CANE)) {
-            return false;   // must be above the base block
-        }
-        // mature column only: another cane two below, or one above (so total height ≥3)
-        return mc.level.getBlockState(pos.below().below()).is(Blocks.SUGAR_CANE)
-            || mc.level.getBlockState(pos.above()).is(Blocks.SUGAR_CANE);
-    }
-
-    /** Are we looking within {@code tol}° of point {@code t}? */
-    private boolean facing(net.minecraft.client.player.LocalPlayer p, Vec3 t, float tol) {
-        Vec3 eye = p.getEyePosition();
-        double d0 = t.x - eye.x;
-        double d1 = t.y - eye.y;
-        double d2 = t.z - eye.z;
-        double dxz = Math.sqrt(d0 * d0 + d2 * d2);
-        float wy = (float) (Math.toDegrees(Math.atan2(d2, d0)) - 90.0);
-        float wp = (float) (-Math.toDegrees(Math.atan2(d1, dxz)));
-        return Math.abs(Mth.degreesDifference(p.getYRot(), wy)) < tol
-            && Math.abs(p.getXRot() - wp) < tol;
-    }
-
-    private net.minecraft.world.entity.item.ItemEntity nearestCaneDrop(Minecraft mc, double r) {
-        net.minecraft.world.entity.item.ItemEntity best = null;
-        double bestD = r * r;
-        for (net.minecraft.world.entity.Entity e : mc.level.entitiesForRendering()) {
-            if (!(e instanceof net.minecraft.world.entity.item.ItemEntity ie)) {
-                continue;
-            }
-            if (!itemPath(ie.getItem()).equals("sugar_cane")) {
-                continue;
-            }
-            double d = mc.player.distanceToSqr(e);
-            if (d < bestD) {
-                bestD = d;
-                best = ie;
-            }
-        }
-        return best;
-    }
-
-    /** Sugarcane farming, built like the miner: find the nearest cane, walk to it, mine
-     *  it (aim + hold attack), climb to the next level when this one's clear, sell a pile. */
-    private void farmStep(Minecraft mc) {
-        var p = mc.player;
-        // let the engine climb 1-block stair steps for us (reliable — manual jump timing
-        // on full-block stairs was the "can't climb" bug). Restored when we stop/switch.
-        if (savedAutoJump == null) {
-            savedAutoJump = mc.options.autoJump().get();
-            mc.options.autoJump().set(Boolean.TRUE);
-        }
-        if (handleEating(mc)) {
-            key(mc, mc.options.keyAttack, false);
-            return;
-        }
-        // sell when we've built a good pile of cane (or the pack is filling up)
-        int caneCount = countItem(p, "sugar_cane");
-        if (sellState == 0 && CycleaConfig.get().autoSell
-            && (caneCount >= 192 || p.getInventory().getFreeSlot() < 0)) {
-            mc.player.connection.sendCommand(CycleaConfig.get().sellCommand.replaceFirst("^/", ""));
-            farmSelling = true;
-            sellState = 1;
-            sellWaitTicks = 0;
-            key(mc, mc.options.keyAttack, false);
-            say(mc, "§e/" + CycleaConfig.get().sellCommand + " §7— selling " + caneCount + " cane…");
-            return;
-        }
-
-        BlockPos feet = p.blockPosition();
-        // nearest ready cane on THIS level (throttled scan, cached)
-        if (--farmScanCd <= 0) {
-            farmFar = nearestHarvestCane(mc, feet, 24, -1, 4);
-            farmScanCd = 4;
-        }
-        BlockPos cane = (farmFar != null && isCaneSegment(mc, farmFar)) ? farmFar : null;
-
-        if (cane != null) {
-            Vec3 c = center(cane);
-            if (p.getEyePosition().distanceToSqr(c) <= 20.0) {
-                // in reach — aim at it, and swing ONLY when the crosshair is truly on cane
-                // (never on a stair/structure block in the way — that ate the staircase)
-                farmPath = null;
-                key(mc, mc.options.keyUp, false);
-                key(mc, mc.options.keySprint, false);
-                aimAtFast(p, c);
-                boolean onCane = mc.hitResult instanceof BlockHitResult bhr
-                    && mc.level.getBlockState(bhr.getBlockPos()).is(Blocks.SUGAR_CANE);
-                key(mc, mc.options.keyAttack, onCane);
-            } else {
-                // route to it (A* around walls / up steps — no straight-line spinning)
-                key(mc, mc.options.keyAttack, false);
-                farmPathTo(mc, feet, cane);
-            }
-            return;
-        }
-
-        // no cane in reach — sweep up any dropped cane first so nothing's left behind
-        key(mc, mc.options.keyAttack, false);
-        net.minecraft.world.entity.item.ItemEntity drop = nearestCaneDrop(mc, 14);
-        if (drop != null) {
-            farmPathTo(mc, feet, drop.blockPosition());
-            return;
-        }
-
-        // this floor is clear — PATROL floors directionally so it reaches EVERY level.
-        // Going up: only chase cane on higher floors (so regrown cane below can't drag it
-        // back down and trap it bouncing 1<->2). At the top, flip to down; at the bottom,
-        // flip to up. This walks 1→2→3→4→3→2→1→… forever.
-        BlockPos nextUp = nearestHarvestCane(mc, feet, 24, 2, 32);     // any higher floor
-        BlockPos nextDown = nearestHarvestCane(mc, feet, 24, -32, -2); // any lower floor
-        if (farmGoingUp) {
-            if (nextUp != null) {
-                farmSay(mc, "▲ up to cane Y" + nextUp.getY() + " (I'm Y" + feet.getY() + ")");
-                farmPathTo(mc, feet, nextUp);
-                return;
-            }
-            farmGoingUp = false;                 // nothing higher — head back down
-            farmSay(mc, "top reached — turning down");
-        }
-        if (nextDown != null) {
-            farmSay(mc, "▼ down to cane Y" + nextDown.getY() + " (I'm Y" + feet.getY() + ")");
-            farmPathTo(mc, feet, nextDown);
-            return;
-        }
-        farmGoingUp = true;                       // nothing lower — head back up
-        if (nextUp != null) {
-            farmPathTo(mc, feet, nextUp);
-            return;
-        }
-        // no cane on any floor right now — hold near a ladder/roam, waiting for regrowth
-        BlockPos lad = nearestLadder(mc, 8, true);
-        if (lad != null) {
-            climbLadder(mc, lad, true);
-            return;
-        }
-        wanderFarm(mc);
-    }
-
-    /** Can we step one block in {@code dir} — no wall, no wading into water, floor to
-     *  stand on (carpet counts), or a climbable 1-step? */
-    private boolean farmWalkable(Minecraft mc, BlockPos feet, Direction dir) {
-        BlockPos a = feet.relative(dir);
-        BlockState sa = mc.level.getBlockState(a);
-        if (sa.is(Blocks.WATER) || sa.is(Blocks.LAVA)) {
-            return false;                                // don't wade into the channels
-        }
-        if (sa.isCollisionShapeFullBlock(mc.level, a)) { // a full block ahead — only OK as a 1-step
-            return !mc.level.getBlockState(a.above()).blocksMotion()
-                && !mc.level.getBlockState(a.above(2)).blocksMotion();
-        }
-        if (mc.level.getBlockState(a.above()).blocksMotion()) {
-            return false;                                // wall at head height
-        }
-        // something to stand on: carpet/slab (non-empty collision) at feet, or solid below
-        return !sa.getCollisionShape(mc.level, a).isEmpty()
-            || mc.level.getBlockState(a.below()).blocksMotion();
-    }
-
-    private static int countItem(net.minecraft.client.player.LocalPlayer p, String path) {
-        int n = 0;
-        for (int i = 0; i < 36; i++) {
-            ItemStack s = p.getInventory().getItem(i);
-            if (!s.isEmpty() && itemPath(s).equals(path)) {
-                n += s.getCount();
-            }
-        }
-        return n;
-    }
-
-    /** Nearest harvestable cane (a sugar_cane with sugar_cane below it) within a vertical
-     *  band [loDy, hiDy] relative to the feet — tight band = this floor; wide = any floor. */
-    private BlockPos nearestHarvestCane(Minecraft mc, BlockPos feet, int r, int loDy, int hiDy) {
-        Vec3 eye = mc.player.getEyePosition();
-        BlockPos best = null;
-        double bestD = Double.MAX_VALUE;
-        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
-        for (int dx = -r; dx <= r; dx++) {
-            for (int dy = loDy; dy <= hiDy; dy++) {
-                for (int dz = -r; dz <= r; dz++) {
-                    m.set(feet.getX() + dx, feet.getY() + dy, feet.getZ() + dz);
-                    if (!isCaneSegment(mc, m)) {
-                        continue;   // only mature (≥3 tall) columns, above the base
-                    }
-                    double d = eye.distanceToSqr(Vec3.atCenterOf(m));
-                    if (d < bestD) {
-                        bestD = d;
-                        best = m.immutable();
-                    }
-                }
-            }
-        }
-        return best;
-    }
-
-    private BlockPos nearestLadder(Minecraft mc, int r, boolean up) {
-        BlockPos feet = mc.player.blockPosition();
-        int loY = up ? 0 : -6;
-        int hiY = up ? 6 : 1;
-        BlockPos best = null;
-        double bestD = Double.MAX_VALUE;
-        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
-        for (int dx = -r; dx <= r; dx++) {
-            for (int dy = loY; dy <= hiY; dy++) {
-                for (int dz = -r; dz <= r; dz++) {
-                    m.set(feet.getX() + dx, feet.getY() + dy, feet.getZ() + dz);
-                    if (!mc.level.getBlockState(m).is(Blocks.LADDER)) {
-                        continue;
-                    }
-                    double d = dx * dx + dz * dz;
-                    if (d < bestD) {
-                        bestD = d;
-                        best = m.immutable();
-                    }
-                }
-            }
-        }
-        return best;
-    }
-
-    /** Climb (or descend) a ladder correctly: read which face it's on, approach the open
-     *  side, then push INTO it to go up (or release to slide down). Fixes getting stuck on
-     *  the wrong side. */
-    private void climbLadder(Minecraft mc, BlockPos ladder, boolean up) {
-        var p = mc.player;
-        Direction face;
-        try {
-            face = mc.level.getBlockState(ladder)
-                .getValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.HORIZONTAL_FACING);
-        } catch (Throwable t) {
-            face = Direction.NORTH;
-        }
-        key(mc, mc.options.keySprint, false);
-        double dx = ladder.getX() + 0.5 - p.getX();
-        double dz = ladder.getZ() + 0.5 - p.getZ();
-        double dist = Math.hypot(dx, dz);
-        if (dist > 0.55) {
-            // approach the ladder's column from its OPEN side, walking straight at it
-            float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-            aim(p, yaw, up ? -10f : 10f);
-            key(mc, mc.options.keyUp, true);
-            key(mc, mc.options.keyJump, up && dist < 1.4 && solidStep(mc, p.blockPosition().relative(face.getOpposite())));
-            return;
-        }
-        // on the ladder: face INTO the wall it's on; push up to climb, release to descend
-        aim(p, face.getOpposite().toYRot(), up ? -35f : 25f);
-        key(mc, mc.options.keyUp, up);
-        key(mc, mc.options.keyJump, false);
-    }
-
-    /** True only if there's a REAL full-block step to climb one ahead. Carpet, slabs,
-     *  cane, snow layers etc. are walk-on/through — never hop those (that was the farm's
-     *  jump-spam over carpet-covered water). */
-    private boolean solidStep(Minecraft mc, BlockPos ahead) {
-        return mc.level.getBlockState(ahead).isCollisionShapeFullBlock(mc.level, ahead)
-            && !mc.level.getBlockState(ahead.above()).blocksMotion();
-    }
-
-    /** Walk smoothly toward a spot; jump ONLY to climb a real step or a ladder. Steers
-     *  around a wall in the way (light obstacle avoidance — a staircase is still best). */
-    private void walkToward(Minecraft mc, double tx, double tz, boolean up) {
-        var p = mc.player;
-        double dx = tx - p.getX();
-        double dz = tz - p.getZ();
-        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-
-        BlockPos feet = p.blockPosition();
-        Direction d = Direction.fromYRot(yaw);
-        BlockPos af = feet.relative(d);
-        boolean wall = mc.level.getBlockState(af.above()).blocksMotion();   // head-height blocked
-        if (wall && !solidStep(mc, af)) {
-            // a real wall (not a 1-step) — veer toward whichever side is open
-            boolean leftOpen = !mc.level.getBlockState(feet.relative(d.getCounterClockWise()).above()).blocksMotion();
-            yaw += leftOpen ? -50f : 50f;
-        }
-        aim(p, yaw, up ? -6f : 6f);   // eased, smooth turn
-        key(mc, mc.options.keySprint, false);
-        BlockPos ahead = feet.relative(Direction.fromYRot(yaw));
-        // EDGE GUARD: don't walk off a 2+ block drop (that's the "fall off the edge and
-        // climb back" loop). A single step down (descending a floor) is fine.
-        boolean cliff = !up && passable(mc, ahead) && passable(mc, ahead.below())
-            && passable(mc, ahead.below().below());
-        key(mc, mc.options.keyUp, !cliff);
-        // jump ONLY to climb a real step or a ladder — never bob in the water channels
-        key(mc, mc.options.keyJump, up || (solidStep(mc, ahead) && !p.isInWater()));
-    }
-
-    private void wanderFarm(Minecraft mc) {
-        if (--farmWanderTicks <= 0) {
-            farmDir = Direction.from2DDataValue(rng.nextInt(4));
-            farmWanderTicks = 40 + rng.nextInt(40);   // longer legs — calmer, not twitchy
-        }
-        var p = mc.player;
-        aim(p, farmDir.toYRot(), 2f);
-        BlockPos ahead = p.blockPosition().relative(farmDir);
-        key(mc, mc.options.keyUp, true);
-        key(mc, mc.options.keySprint, false);
-        key(mc, mc.options.keyJump, solidStep(mc, ahead) && !p.isInWater());   // real steps only
-    }
 
     // ---------------- Stash vault builder ----------------
 
@@ -3214,7 +2728,16 @@ public final class Autopilot {
         km.setDown(down);
     }
 
+    /** Routine status chatter — suppressed in Quiet Mode so you don't get spammed while AFK. */
     private static void say(Minecraft mc, String msg) {
+        if (CycleaConfig.get().quiet) {
+            return;
+        }
+        sayAlways(mc, msg);
+    }
+
+    /** Important messages (hand-offs, hazards, sales) — always shown, even in Quiet Mode. */
+    private static void sayAlways(Minecraft mc, String msg) {
         if (mc.player != null) {
             mc.player.sendSystemMessage(Component.literal(msg));
         }

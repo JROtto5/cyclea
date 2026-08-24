@@ -115,11 +115,6 @@ public class CycleaClient implements ClientModInitializer {
                         Autopilot.get().startMineMoney(Minecraft.getInstance());
                         return 1;
                     }))
-                .then(ClientCommands.literal("farm")
-                    .executes(ctx -> {
-                        Autopilot.get().startFarm(Minecraft.getInstance());
-                        return 1;
-                    }))
                 .then(ClientCommands.literal("spawn")
                     .executes(ctx -> {
                         Autopilot.get().gotoSpawn(Minecraft.getInstance());

@@ -37,7 +37,7 @@ public final class CycleaConfig {
     public int paceLevel = 1;
     // operating mode: 0 = Miner (strip toward spawn), 1 = Surface scout (walk on top,
     // deep-scan for big underground stashes, alert you)
-    public int mode = 0;
+    public int mode = 0;   // NB: mode 2 (sugarcane farm) was retired — keep this 0/1 only
     // stash-alert sensitivity for surface mode: 0 = any, 1 = big (default), 2 = huge
     public int stashLevel = 1;
 
@@ -115,13 +115,12 @@ public final class CycleaConfig {
     public String modeLabel() {
         return switch (mode) {
             case 1 -> "Surface scout (find stashes)";
-            case 2 -> "Sugarcane farm";
             default -> "Miner (strip to spawn)";
         };
     }
 
     public void cycleMode() {
-        mode = (mode + 1) % 3;
+        mode = (mode + 1) % 2;
         save();
     }
 
@@ -175,6 +174,19 @@ public final class CycleaConfig {
 
     public String runWithMenusLabel() {
         return runWithMenus ? "On (runs with menu open)" : "Off";
+    }
+
+    // Quiet Mode: suppress routine status chatter in chat (hand-offs, sales, and hazard
+    // alerts still show). Great for long AFK runs so chat isn't spammed.
+    public boolean quiet = false;
+
+    public void cycleQuiet() {
+        quiet = !quiet;
+        save();
+    }
+
+    public String quietLabel() {
+        return quiet ? "On (only important messages)" : "Off (all status chatter)";
     }
 
     // Emergency escape: run a home/teleport command when about to die, hit hard, or a
@@ -408,6 +420,7 @@ public final class CycleaConfig {
                 escapeHome = Boolean.parseBoolean(p.getProperty("escapeHome", "true"));
                 homeCommand = p.getProperty("homeCommand", "home 2");
                 runWithMenus = Boolean.parseBoolean(p.getProperty("runWithMenus", "true"));
+                quiet = Boolean.parseBoolean(p.getProperty("quiet", "false"));
                 watchman = Boolean.parseBoolean(p.getProperty("watchman", "true"));
                 oreEsp = Boolean.parseBoolean(p.getProperty("oreEsp", "true"));
                 tracers = Boolean.parseBoolean(p.getProperty("tracers", "true"));
@@ -418,6 +431,7 @@ public final class CycleaConfig {
                 }
                 baseScan = Boolean.parseBoolean(p.getProperty("baseScan", "true"));
                 mode = Integer.parseInt(p.getProperty("mode", "0"));
+                if (mode < 0 || mode > 1) mode = 0;   // retired the old farm mode (2); clamp stale configs
                 stashLevel = Integer.parseInt(p.getProperty("stashLevel", "1"));
                 onFindLevel = Integer.parseInt(p.getProperty("onFind", "0"));
                 skipRaided = Boolean.parseBoolean(p.getProperty("skipRaided", "true"));
@@ -440,6 +454,7 @@ public final class CycleaConfig {
         p.setProperty("escapeHome", Boolean.toString(escapeHome));
         p.setProperty("homeCommand", homeCommand);
         p.setProperty("runWithMenus", Boolean.toString(runWithMenus));
+        p.setProperty("quiet", Boolean.toString(quiet));
         p.setProperty("watchman", Boolean.toString(watchman));
         p.setProperty("oreEsp", Boolean.toString(oreEsp));
         p.setProperty("tracers", Boolean.toString(tracers));
