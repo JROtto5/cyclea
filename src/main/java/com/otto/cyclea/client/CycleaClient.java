@@ -49,6 +49,7 @@ public class CycleaClient implements ClientModInitializer {
     private KeyMapping vaultKey;
     private KeyMapping clearLogKey;
     private KeyMapping configKey;
+    private KeyMapping freeCursorKey;
     private int watchCounter = 0;
     private int watchAlertCd = 0;
     private int tickCounter = 0;
@@ -69,6 +70,7 @@ public class CycleaClient implements ClientModInitializer {
         vaultKey = reg("key.cyclea.vault", GLFW.GLFW_KEY_V);
         clearLogKey = reg("key.cyclea.clearlog", GLFW.GLFW_KEY_C);
         configKey = reg("key.cyclea.config", GLFW.GLFW_KEY_J);
+        freeCursorKey = reg("key.cyclea.freecursor", GLFW.GLFW_KEY_U);
 
         CycleaConfig.get().load();
         HudElementRegistry.addLast(
@@ -309,6 +311,17 @@ public class CycleaClient implements ClientModInitializer {
 
         while (configKey.consumeClick()) {
             mc.setScreenAndShow(new CycleaConfigScreen());
+        }
+        while (freeCursorKey.consumeClick()) {
+            // Free the cursor WITHOUT opening a menu — so you can use other monitors/apps while
+            // it keeps mining. Unlike ESC this opens no screen, so singleplayer never pauses.
+            if (mc.mouseHandler.isMouseGrabbed()) {
+                mc.mouseHandler.releaseMouse();
+                say(mc, "§b🖱 cursor freed §7— use other screens; it keeps mining. §8[U] again to recapture");
+            } else {
+                mc.mouseHandler.grabMouse();
+                say(mc, "§b🖱 cursor recaptured");
+            }
         }
         while (searchModeKey.consumeClick()) {
             String m = Autopilot.get().toggleSearchMode(mc);

@@ -84,6 +84,8 @@ public final class Autopilot {
     private BlockPos pillarSpot = null;       // spot to fill mid-jump when climbing out of Y-60
     private int climbTicks = 0;               // how long we've been climbing out of a dip
     private Direction climbDir = null;        // fixed stair-up direction while climbing
+    private int climbLastY = Integer.MIN_VALUE;   // highest feet-Y reached this climb (progress tracker)
+    private int climbStall = 0;               // ticks since we last gained height while climbing
     private Boolean savedAutoJump = null;     // user's auto-jump setting, restored after a climb
     // AFK support: while running we stop MC from throttling FPS / pausing when the window
     // loses focus, so you can alt-tab to other screens and it keeps mining full speed.
@@ -450,6 +452,8 @@ public final class Autopilot {
         pillarSpot = null;
         climbTicks = 0;
         climbDir = null;
+        climbLastY = Integer.MIN_VALUE;
+        climbStall = 0;
         pillarTicks = 0;
         lockedDir = null;
         lockTicks = 0;
@@ -870,6 +874,40 @@ public final class Autopilot {
                 mc.options.autoJump().set(Boolean.TRUE);
             }
 
+            // CLIMB WATCHDOG — the only safety net down here. The frozen-restart guard and the
+            // horizontal anti-stuck ladder BOTH stand down while we're below target depth, so if
+            // the climb logic below deadlocks (findStepUp pointing at a step it can't mount, or
+            // the stair loop spinning on lava) nothing else would ever catch it. Track height:
+            if (feetC.getY() > climbLastY) {
+                climbLastY = feetC.getY();
+                climbStall = 0;             // gained a block — the climb is working
+            } else {
+                climbStall++;
+            }
+            // stalled ~10s of trying with zero height gained → we're genuinely boxed at Y-60.
+            // Take the human way out instead of spinning here forever: teleport home.
+            if (climbStall > 200) {
+                climbStall = 0;
+                escapeBoxedIn(mc);
+                return;
+            }
+            // stalled ~3s → stop trusting findStepUp/stairs and just PILLAR STRAIGHT UP, the one
+            // escape that always works when there's headroom (we only need a block or two here).
+            if (climbStall > 60) {
+                BlockPos headB = feetC.above(2);
+                if (canMine(mc, headB)) {   // clear our own ceiling first
+                    swingAt(mc, headB);
+                    return;
+                }
+                if (player.onGround() && ensureHotbarBlock(mc)) {
+                    pillarSpot = feetC;     // MID-PILLAR LATCH fills this as we jump
+                    pillarTicks = 0;
+                    key(mc, mc.options.keyJump, true);
+                    return;
+                }
+                // no block to pillar with / not grounded — fall through and keep trying stairs
+            }
+
             // EASY WAY UP FIRST: if any neighbour is a 1-block step up (almost always the
             // tunnel we just came from, whose floor sits at our target level), just BACK UP
             // onto it — sprint-jump mounts it cleanly. This is what a player does.
@@ -942,6 +980,8 @@ public final class Autopilot {
         }
         climbTicks = 0;
         climbDir = null;
+        climbLastY = Integer.MIN_VALUE;
+        climbStall = 0;
         pillarSpot = null;   // at/above target depth — no pillar pending
         if (savedAutoJump != null) {
             mc.options.autoJump().set(savedAutoJump);    // climb over — restore your setting
