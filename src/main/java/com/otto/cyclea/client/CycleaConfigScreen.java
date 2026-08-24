@@ -60,6 +60,7 @@ public class CycleaConfigScreen extends Screen {
         addRow(escapeMsg(), b -> { c.cycleEscapeHome(); b.setMessage(escapeMsg()); });
         addRow(runMenusMsg(), b -> { c.cycleRunWithMenus(); b.setMessage(runMenusMsg()); });
         addRow(quietMsg(), b -> { c.cycleQuiet(); b.setMessage(quietMsg()); });
+        addRow(supplyMsg(), b -> { c.cycleSupplyShulker(); b.setMessage(supplyMsg()); });
         addRow(turnMsg(), b -> { c.cycleTurn(); b.setMessage(turnMsg()); });
         addRow(glanceMsg(), b -> { c.cycleGlance(); b.setMessage(glanceMsg()); });
         addRow(sweepMsg(), b -> { c.cycleSweepStep(); b.setMessage(sweepMsg()); });
@@ -150,6 +151,10 @@ public class CycleaConfigScreen extends Screen {
 
     private Component quietMsg() {
         return Component.literal("Quiet mode: " + CycleaConfig.get().quietLabel());
+    }
+
+    private Component supplyMsg() {
+        return Component.literal("Supply shulker: " + CycleaConfig.get().supplyShulkerLabel());
     }
 
     private Component turnMsg() {

@@ -444,6 +444,10 @@ public final class Autopilot {
         lockedDir = null;
         lockTicks = 0;
         vaultState = 0;
+        restockState = 0;
+        restockPos = null;
+        restockWait = 0;
+        restockCd = 0;
         deadTicks = 0;
         aliveX = Double.NaN;
         aliveInv = -1;
@@ -618,6 +622,17 @@ public final class Autopilot {
                 handleSell(mc);
             } catch (Throwable t) {
                 sellState = 0;
+            }
+            return;
+        }
+        // SUPPLY RUN: mid-restock from a carried shulker (fresh pick / food). Like selling,
+        // this operates a container — normal driving + the watchdog must stand down while it runs.
+        if (restockState != 0) {
+            try {
+                handleRestock(mc);
+            } catch (Throwable t) {
+                restockState = 0;
+                releaseAll(mc);
             }
             return;
         }
@@ -1055,6 +1070,13 @@ public final class Autopilot {
                 return;   // freed a slot this tick — carry on
             }
             stop(mc, "§einventory full of keepers — empty me (into a shulker), then press O");
+            return;
+        }
+
+        // 1d) SUPPLY SHULKER (Epic 2): before we'd ever stop for a worn-out pickaxe or an
+        //     empty belly, if you're carrying a shulker of spares we place it, pull a fresh
+        //     tool / food out, break it back down, and keep mining — unattended for hours.
+        if (maybeRestock(mc)) {
             return;
         }
 
@@ -2165,6 +2187,308 @@ public final class Autopilot {
 
     private String itemPathBlock(Minecraft mc, BlockPos p) {
         return BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(p).getBlock()).getPath();
+    }
+
+    // ---------------- Supply Shulker: restock tools & food on the fly (Epic 2) ----------------
+
+    private int restockState = 0;   // 0 idle, 1 place, 2 open+pull, 3 break, 4 collect
+    private BlockPos restockPos = null;
+    private int restockTimeout = 0;
+    private int restockWait = 0;
+    private int restockCd = 0;       // ticks before another supply run may fire (loop guard)
+    private int restockPulled = 0;
+    private String restockReason = "";
+
+    /** True while a supply run is placing / opening / breaking its shulker. */
+    public boolean restockActive() {
+        return restockState != 0;
+    }
+
+    /** A shulker box loose in the inventory = our portable supply bag. */
+    private boolean hasSupplyShulker(Minecraft mc) {
+        Inventory inv = mc.player.getInventory();
+        for (int i = 0; i < 36; i++) {
+            if (itemPath(inv.getItem(i)).endsWith("shulker_box")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasHealthyPick(Minecraft mc) {
+        Inventory inv = mc.player.getInventory();
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = inv.getItem(i);
+            if (isPickaxe(s) && !nearlyBroken(s)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isRealFood(ItemStack s) {
+        return s.has(DataComponents.FOOD)
+            && !s.is(Items.GOLDEN_APPLE) && !s.is(Items.ENCHANTED_GOLDEN_APPLE);
+    }
+
+    private int foodStacks(Minecraft mc) {
+        Inventory inv = mc.player.getInventory();
+        int n = 0;
+        for (int i = 0; i < 36; i++) {
+            if (isRealFood(inv.getItem(i))) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /** Kick off a supply run if we're about to run dry AND a shulker of spares is aboard.
+     *  @return true if a run was started this tick (caller should end the mining step). */
+    private boolean maybeRestock(Minecraft mc) {
+        if (restockCd > 0) {
+            restockCd--;
+            return false;
+        }
+        if (restockState != 0 || !CycleaConfig.get().supplyShulker || !hasSupplyShulker(mc)) {
+            return false;
+        }
+        boolean pickCrisis = !hasHealthyPick(mc);
+        boolean foodCrisis = mc.player.getFoodData().getFoodLevel() <= 6 && foodStacks(mc) == 0;
+        if (!pickCrisis && !foodCrisis) {
+            return false;
+        }
+        startRestock(mc, pickCrisis ? "pickaxe worn out" : "out of food");
+        return true;
+    }
+
+    private void startRestock(Minecraft mc, String reason) {
+        restockReason = reason;
+        restockState = 1;
+        restockPos = null;
+        restockTimeout = 0;
+        restockWait = 0;
+        restockPulled = 0;
+        mining = null;
+        key(mc, mc.options.keyAttack, false);
+        key(mc, mc.options.keyUp, false);
+        sayAlways(mc, "§b⛏ Supply run — " + reason + "; restocking from your shulker…");
+    }
+
+    private void handleRestock(Minecraft mc) {
+        if (mc.player == null) {
+            restockState = 0;
+            return;
+        }
+        if (++restockTimeout > 600) {   // ~30s hard safety valve
+            finishRestock(mc, "§7supply run timed out — carrying on");
+            return;
+        }
+        switch (restockState) {
+            case 1 -> restockPlace(mc);
+            case 2 -> restockPull(mc);
+            case 3 -> restockBreak(mc);
+            case 4 -> restockCollect(mc);
+            default -> restockState = 0;
+        }
+    }
+
+    /** Put the shulker in the hotbar (if needed) and stand it on the ground beside our feet. */
+    private void restockPlace(Minecraft mc) {
+        if (!ensureShulkerInHotbar(mc)) {
+            finishRestock(mc, "§7couldn't ready the shulker — carrying on");
+            return;
+        }
+        if (restockPos == null) {
+            BlockPos feet = mc.player.blockPosition();
+            for (Direction d : Direction.Plane.HORIZONTAL) {
+                BlockPos spot = feet.relative(d);
+                // open cell, solid floor under it, clear head, nothing wet touching it
+                if (passable(mc, spot) && !passable(mc, spot.below()) && !hazard(mc, spot.below())
+                    && !hazard(mc, spot) && !hazard(mc, spot.above())) {
+                    restockPos = spot;
+                    break;
+                }
+            }
+        }
+        if (restockPos == null) {
+            finishRestock(mc, "§7no room to set the shulker down — carrying on");
+            return;
+        }
+        if (place(mc, restockPos, "shulker_box")) {
+            placedBlocks.remove(restockPos.asLong());   // we WILL mine this one back
+            restockState = 2;
+            restockWait = 0;
+        }
+    }
+
+    /** Open the shulker (holding a non-block so the click opens, not places), then shift a
+     *  fresh pickaxe / tools / food out of it into our inventory. */
+    private void restockPull(Minecraft mc) {
+        var p = mc.player;
+        var menu = p.containerMenu;
+        if (menu == null || menu.containerId == 0) {
+            holdNonPlaceable(mc);
+            aimAtFast(p, center(restockPos));
+            mc.gameMode.useItemOn(p, InteractionHand.MAIN_HAND,
+                new BlockHitResult(center(restockPos), Direction.UP, restockPos, false));
+            if (++restockWait > 40) {
+                restockState = 3;   // couldn't open — just break it back and move on
+                restockWait = 0;
+            }
+            return;
+        }
+        boolean needPick = !hasHealthyPick(mc);
+        int wantFood = Math.max(0, 2 - foodStacks(mc));
+        int pulled = 0;
+        for (int i = 0; i < menu.slots.size(); i++) {
+            var slot = menu.slots.get(i);
+            if (slot.container == p.getInventory() || !slot.hasItem()) {
+                continue;   // player-side slot, or empty
+            }
+            ItemStack s = slot.getItem();
+            boolean take = false;
+            if (needPick && isPickaxe(s) && !nearlyBroken(s)) {
+                take = true;
+                needPick = false;
+            } else if (wantFood > 0 && isRealFood(s)) {
+                take = true;
+                wantFood--;
+            } else if (isSpareTool(mc, s)) {
+                take = true;
+            }
+            if (take) {
+                mc.gameMode.handleContainerInput(menu.containerId, i, 0,
+                    net.minecraft.world.inventory.ContainerInput.QUICK_MOVE, p);
+                pulled++;
+            }
+        }
+        p.closeContainer();
+        restockPulled = pulled;
+        restockState = 3;
+        restockWait = 0;
+    }
+
+    /** A healthy sword/axe/shovel we're currently missing a good copy of — top it up too. */
+    private boolean isSpareTool(Minecraft mc, ItemStack s) {
+        for (String kind : new String[]{"sword", "axe", "shovel"}) {
+            if (kind.equals("axe") && isPickaxe(s)) {
+                continue;   // "pickaxe" ends with "axe" — don't treat it as an axe
+            }
+            if (tool(s, kind) && !nearlyBroken(s) && !hasHealthyTool(mc, kind)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasHealthyTool(Minecraft mc, String kind) {
+        Inventory inv = mc.player.getInventory();
+        for (int i = 0; i < 36; i++) {
+            ItemStack s = inv.getItem(i);
+            if (kind.equals("axe") && isPickaxe(s)) {
+                continue;
+            }
+            if (tool(s, kind) && !nearlyBroken(s)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Mine the placed shulker back so it (and its leftover supplies) drop for pickup. */
+    private void restockBreak(Minecraft mc) {
+        if (restockPos == null || mc.level.getBlockState(restockPos).isAir()) {
+            key(mc, mc.options.keyAttack, false);
+            restockState = 4;
+            restockWait = 0;
+            return;
+        }
+        swingAt(mc, restockPos);
+    }
+
+    /** Hold still a beat so the dropped shulker vacuums up, then resume mining. */
+    private void restockCollect(Minecraft mc) {
+        key(mc, mc.options.keyAttack, false);
+        if (++restockWait > 14) {
+            String msg = restockPulled > 0
+                ? "§a✔ restocked §7(" + restockPulled + " item" + (restockPulled == 1 ? "" : "s")
+                    + ") — back to mining"
+                : "§7shulker had no spares — back to mining";
+            finishRestock(mc, msg);
+        }
+    }
+
+    private void finishRestock(Minecraft mc, String msg) {
+        if (mc.player != null && mc.player.containerMenu != null
+            && mc.player.containerMenu.containerId != 0) {
+            mc.player.closeContainer();
+        }
+        key(mc, mc.options.keyAttack, false);
+        restockState = 0;
+        restockPos = null;
+        restockWait = 0;
+        restockCd = 200;   // ~10s before another run can fire (so an empty bag can't loop)
+        if (msg != null) {
+            sayAlways(mc, msg);
+        }
+    }
+
+    /** Move a shulker box into the hotbar if it's only in the main inventory. */
+    private boolean ensureShulkerInHotbar(Minecraft mc) {
+        Inventory inv = mc.player.getInventory();
+        if (findHotbar(inv, s -> itemPath(s).endsWith("shulker_box")) >= 0) {
+            return true;
+        }
+        int src = -1;
+        for (int i = 9; i < 36; i++) {
+            if (itemPath(inv.getItem(i)).endsWith("shulker_box")) {
+                src = i;
+                break;
+            }
+        }
+        if (src < 0) {
+            return false;
+        }
+        int dest = spareHotbarSlot(mc);
+        if (dest < 0) {
+            return false;
+        }
+        mc.gameMode.handleContainerInput(mc.player.inventoryMenu.containerId, src, dest,
+            net.minecraft.world.inventory.ContainerInput.SWAP, mc.player);
+        return true;
+    }
+
+    /** An empty hotbar slot, else one holding loot/junk we can safely bump. -1 if none. */
+    private int spareHotbarSlot(Minecraft mc) {
+        Inventory inv = mc.player.getInventory();
+        for (int i = 0; i < 9; i++) {
+            if (inv.getItem(i).isEmpty()) {
+                return i;
+            }
+        }
+        for (int i = 0; i < 9; i++) {
+            ItemStack s = inv.getItem(i);
+            if (!keepItem(s) || (s.getItem() instanceof BlockItem && JUNK.contains(itemPath(s)))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** Hold something that ISN'T a placeable block so a right-click OPENS the shulker
+     *  instead of placing another one. Prefers a pickaxe (even a worn one). */
+    private void holdNonPlaceable(Minecraft mc) {
+        Inventory inv = mc.player.getInventory();
+        int slot = findHotbar(inv, this::isPickaxeStack);
+        if (slot < 0) {
+            slot = findHotbar(inv, s -> !s.isEmpty() && !(s.getItem() instanceof BlockItem));
+        }
+        if (slot < 0) {
+            slot = findHotbar(inv, ItemStack::isEmpty);   // an empty hand also opens, never places
+        }
+        if (slot >= 0) {
+            inv.setSelectedSlot(slot);
+        }
     }
 
     // ---------------- Surface scout mode ----------------

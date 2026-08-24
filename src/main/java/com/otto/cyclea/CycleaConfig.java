@@ -189,6 +189,20 @@ public final class CycleaConfig {
         return quiet ? "On (only important messages)" : "Off (all status chatter)";
     }
 
+    // Supply Shulker: carry a shulker of spare pickaxes + food and the bot restocks itself
+    // from it on the fly (place → pull a fresh tool/food → break → collect) instead of ever
+    // stopping for a worn-out pickaxe or an empty belly. Default ON — it's pure autonomy.
+    public boolean supplyShulker = true;
+
+    public void cycleSupplyShulker() {
+        supplyShulker = !supplyShulker;
+        save();
+    }
+
+    public String supplyShulkerLabel() {
+        return supplyShulker ? "On (auto-restock from a carried shulker)" : "Off";
+    }
+
     // Emergency escape: run a home/teleport command when about to die, hit hard, or a
     // player gets close. Loud alarm + banner. Default ON — it's a safety net.
     public boolean escapeHome = true;
@@ -421,6 +435,7 @@ public final class CycleaConfig {
                 homeCommand = p.getProperty("homeCommand", "home 2");
                 runWithMenus = Boolean.parseBoolean(p.getProperty("runWithMenus", "true"));
                 quiet = Boolean.parseBoolean(p.getProperty("quiet", "false"));
+                supplyShulker = Boolean.parseBoolean(p.getProperty("supplyShulker", "true"));
                 watchman = Boolean.parseBoolean(p.getProperty("watchman", "true"));
                 oreEsp = Boolean.parseBoolean(p.getProperty("oreEsp", "true"));
                 tracers = Boolean.parseBoolean(p.getProperty("tracers", "true"));
@@ -455,6 +470,7 @@ public final class CycleaConfig {
         p.setProperty("homeCommand", homeCommand);
         p.setProperty("runWithMenus", Boolean.toString(runWithMenus));
         p.setProperty("quiet", Boolean.toString(quiet));
+        p.setProperty("supplyShulker", Boolean.toString(supplyShulker));
         p.setProperty("watchman", Boolean.toString(watchman));
         p.setProperty("oreEsp", Boolean.toString(oreEsp));
         p.setProperty("tracers", Boolean.toString(tracers));
