@@ -2845,20 +2845,32 @@ public final class Autopilot {
     private BlockPos adjacentOre(Minecraft mc, BlockPos feet) {
         BlockPos best = null;
         double bestD = Double.MAX_VALUE;
+        // Candidate cells: the 6-neighbours of feet + head (grabs ore in the walls, ceiling, and
+        // straight under our feet), PLUS the floor row one step ahead in each horizontal direction
+        // (feet.relative(h).below()). That floor-ahead ring is the "diamond under the floor" the
+        // strip pattern used to walk over: it stays buried until we've stepped past, so we probe
+        // it explicitly and drop a block to grab it — nothing gets left in the floor.
+        java.util.List<BlockPos> cells = new java.util.ArrayList<>();
         for (BlockPos base : new BlockPos[]{feet, feet.above()}) {
             for (Direction d : Direction.values()) {
-                BlockPos p = base.relative(d);
-                if (oreBlacklist.contains(p.asLong())) {
-                    continue;   // gave up on this one — don't re-grab it
-                }
-                String path = BuiltInRegistries.BLOCK.getKey(
-                    mc.level.getBlockState(p).getBlock()).getPath();
-                if (CycleaConfig.get().wantsOre(path) && !hasHazardNeighbor(mc, p)) {
-                    double dist = p.distSqr(feet);
-                    if (dist < bestD) {
-                        bestD = dist;
-                        best = p;
-                    }
+                cells.add(base.relative(d));
+            }
+        }
+        for (Direction h : new Direction[]{Direction.NORTH, Direction.SOUTH,
+                Direction.EAST, Direction.WEST}) {
+            cells.add(feet.relative(h).below());   // ore in the floor just ahead
+        }
+        for (BlockPos p : cells) {
+            if (p.getY() < targetY - 1 || oreBlacklist.contains(p.asLong())) {
+                continue;   // don't dig into the bedrock zone, or re-grab a given-up ore
+            }
+            String path = BuiltInRegistries.BLOCK.getKey(
+                mc.level.getBlockState(p).getBlock()).getPath();
+            if (CycleaConfig.get().wantsOre(path) && !hasHazardNeighbor(mc, p)) {
+                double dist = p.distSqr(feet);
+                if (dist < bestD) {
+                    bestD = dist;
+                    best = p;
                 }
             }
         }

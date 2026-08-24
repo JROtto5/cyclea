@@ -112,15 +112,54 @@ public final class TargetScanner {
                     if (!cfg.wantsOre(path)) {
                         continue;
                     }
-                    // absolute block coords + colour, so the HUD can project them live
-                    out.add(new int[]{m.getX(), m.getY(), m.getZ(), oreColor(path)});
-                    if (out.size() >= 250) {
-                        return out;
+                    // absolute block coords + colour + value rank, so the HUD can project them
+                    // live AND draw the good stuff (diamond/redstone/gold) first.
+                    out.add(new int[]{m.getX(), m.getY(), m.getZ(), oreColor(path), oreRank(path)});
+                    if (out.size() >= 400) {
+                        break;
                     }
                 }
             }
         }
+        // highest-value ores first: they get the boxes and the limited tracer lines before
+        // coal/copper/iron ever do, so the tracers always point at the prizes.
+        out.sort(java.util.Comparator.comparingInt((int[] o) -> o[4]).reversed());
         return out;
+    }
+
+    /** Rough value tier for a wanted block, so tracers/boxes prioritise the good stuff. */
+    private static int oreRank(String path) {
+        if (path.equals("respawn_anchor")) {
+            return 100;
+        }
+        if (path.equals("ancient_debris")) {
+            return 95;
+        }
+        if (path.contains("diamond")) {
+            return 90;
+        }
+        if (path.contains("emerald")) {
+            return 80;
+        }
+        if (path.contains("gold")) {
+            return 60;
+        }
+        if (path.contains("redstone")) {
+            return 50;
+        }
+        if (path.contains("lapis")) {
+            return 40;
+        }
+        if (path.contains("quartz")) {
+            return 30;
+        }
+        if (path.contains("copper")) {
+            return 20;
+        }
+        if (path.contains("iron")) {
+            return 15;
+        }
+        return 5;   // coal / everything else
     }
 
     /** Nearby containers (chests/barrels/shulkers) within {@code radius} as {x,y,z,rgb}
