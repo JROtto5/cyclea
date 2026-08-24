@@ -500,6 +500,7 @@ public final class Autopilot {
             ownMouse = false;
             mc.mouseHandler.grabMouse();
         }
+        restoreVsync(mc);         // give VSync back if own-mouse mode had dropped it
         // log this as a hand-off to the human, categorized
         takeovers++;
         lastStopReason = stripCodes(reason);
@@ -693,6 +694,7 @@ public final class Autopilot {
 
     private BlockPos menuBreakPos = null;
     private boolean ownMouse = false;          // free the OS cursor but keep MC's grab (bot's "own mouse")
+    private Boolean savedVsync = null;         // your VSync setting, dropped while on other screens, restored after
     private static java.lang.reflect.Field screenField;
     private static java.lang.reflect.Field grabbedField;
 
@@ -712,10 +714,27 @@ public final class Autopilot {
         ownMouse = !ownMouse;
         if (ownMouse) {
             maintainOwnMouse(mc);
+            // Drop VSync while you're away: with VSync on under a compositor, an UNFOCUSED window's
+            // buffer swap waits on the compositor, which repaints it maybe twice a second — the
+            // "updates every 2 seconds" slideshow. Off, it renders on the GPU clock regardless of
+            // focus, so you can actually watch it on another monitor. Restored on retoggle / stop.
+            if (savedVsync == null) {
+                savedVsync = mc.options.enableVsync().get();
+                mc.options.enableVsync().set(false);
+            }
         } else {
             mc.mouseHandler.grabMouse();   // recapture: back to normal play
+            restoreVsync(mc);
         }
         return ownMouse;
+    }
+
+    /** Put VSync back exactly as it was before own-mouse mode dropped it. */
+    private void restoreVsync(Minecraft mc) {
+        if (savedVsync != null) {
+            mc.options.enableVsync().set(savedVsync);
+            savedVsync = null;
+        }
     }
 
     /** Set MC's private mouseGrabbed flag without touching the OS cursor (reflection). */
