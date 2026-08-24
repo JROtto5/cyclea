@@ -3016,11 +3016,42 @@ public final class Autopilot {
         return false;
     }
 
+    private static boolean hasSilkTouch(ItemStack s) {
+        if (s.isEmpty()) {
+            return false;
+        }
+        var ench = s.get(DataComponents.ENCHANTMENTS);
+        if (ench == null) {
+            return false;
+        }
+        for (var holder : ench.keySet()) {
+            if (holder.getRegisteredName().endsWith("silk_touch") && ench.getLevel(holder) > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Blocks that only drop themselves when mined with Silk Touch (else drop nothing / dust). */
+    private static boolean needsSilkTouch(BlockState st) {
+        return BuiltInRegistries.BLOCK.getKey(st.getBlock()).getPath().equals("respawn_anchor");
+    }
+
     /** Pick the right tool: shovel for soft ground, axe for wood, pickaxe otherwise.
-     *  For Fortune-able ores, prefer a healthy Fortune pickaxe if one's in the hotbar. */
+     *  For Fortune-able ores, prefer a healthy Fortune pickaxe; for Silk-Touch-only blocks
+     *  (respawn anchors) prefer a healthy Silk Touch pickaxe so the block actually drops. */
     private void selectToolFor(Minecraft mc, BlockState st) {
         Inventory inv = mc.player.getInventory();
         String want = isShovelBlock(st) ? "shovel" : isAxeBlock(st) ? "axe" : "pickaxe";
+        if (want.equals("pickaxe") && needsSilkTouch(st)) {
+            int silk = findHotbar(inv, s -> isPickaxe(s) && !nearlyBroken(s) && hasSilkTouch(s));
+            if (silk >= 0) {
+                if (silk != inv.getSelectedSlot()) {
+                    inv.setSelectedSlot(silk);
+                }
+                return;
+            }
+        }
         if (want.equals("pickaxe") && CycleaConfig.get().veinMine && benefitsFromFortune(st)) {
             int f = findHotbar(inv, s -> isPickaxe(s) && !nearlyBroken(s) && hasFortune(s));
             if (f >= 0) {

@@ -326,6 +326,12 @@ public final class CycleaConfig {
         if (oreSeekLevel == 0) {
             return false;
         }
+        // Respawn anchors: a high-value block the user hits mining the overworld underground.
+        // Always worth grabbing (mined with Silk Touch so the block itself drops) regardless of
+        // seek tier or diamond focus.
+        if (path.equals("respawn_anchor")) {
+            return true;
+        }
         boolean ore = path.endsWith("_ore") || path.equals("ancient_debris");
         if (!ore) {
             return false;

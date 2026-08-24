@@ -32,6 +32,7 @@ public final class CycleaLedger {
     private static final Map<String, Integer> DEFAULT_PRICES = new LinkedHashMap<>();
     static {
         DEFAULT_PRICES.put("netherite", 150);
+        DEFAULT_PRICES.put("respawn_anchor", 60);   // crying obsidian + glowstone — big underground grab
         DEFAULT_PRICES.put("diamond", 40);
         DEFAULT_PRICES.put("emerald", 35);
         DEFAULT_PRICES.put("gold", 8);
