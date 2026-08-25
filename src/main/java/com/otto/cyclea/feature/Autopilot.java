@@ -494,6 +494,7 @@ public final class Autopilot {
         pendingOre = null;
         pendingOreType = "";
         CycleaLedger.get().resetSession();   // fresh profit tally for this run
+        CycleaTelemetry.get().resetSession();   // fresh operational counters (food/hazards/deaths)
         sellCd = 0;
         sellState = 0;
         sellWaitTicks = 0;
@@ -2897,6 +2898,8 @@ public final class Autopilot {
     }
 
     private void startConsume(Minecraft mc, Inventory inv, int slot) {
+        ItemStack cs = inv.getItem(slot);
+        CycleaTelemetry.get().ate(cs.is(Items.GOLDEN_APPLE) || cs.is(Items.ENCHANTED_GOLDEN_APPLE));
         prevSlot = inv.getSelectedSlot();
         inv.setSelectedSlot(slot);
         key(mc, mc.options.keyUp, false);
@@ -3231,6 +3234,7 @@ public final class Autopilot {
             toolAlertCd--;
         } else {
             int left = held.getMaxDamage() - held.getDamageValue();
+            CycleaTelemetry.get().toolWarning();
             mc.player.playSound(net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, 1f, 0.4f);
             say(mc, "§c⚠ pickaxe almost broken §7(" + left + " uses left) §c— no spare in the hotbar!");
             toolAlertCd = 100;   // ~5s between warnings
@@ -3323,6 +3327,28 @@ public final class Autopilot {
             sayAlways(mc, "§7best vein: §d" + vein);
         }
         sayAlways(mc, "§7all-time: §a$" + led.allTimeValue() + " §8(edit prices in cyclea-ledger.properties)");
+
+        // --- operational telemetry: how healthy the run is (not just $$) -----
+        CycleaTelemetry tel = CycleaTelemetry.get();
+        sayAlways(mc, "§6§l⚙ Telemetry");
+        sayAlways(mc, "§7pace: §b" + getOresMined() + " ores §7(§b" + getOresPerHour()
+            + "§7/hr), §f" + getBlocksTraveled() + "m travelled");
+        sayAlways(mc, "§7fed: §a" + tel.meals() + " meals"
+            + (tel.goldenApples() > 0 ? " §7+ §d" + tel.goldenApples() + " golden apples" : ""));
+        int esc = tel.totalEscapes();
+        if (esc > 0) {
+            sayAlways(mc, "§7escapes: §e" + esc + " §7(" + tel.escapeBreakdown() + ")");
+        } else {
+            sayAlways(mc, "§7escapes: §a0 §8— no emergencies this run");
+        }
+        if (tel.toolWarnings() > 0) {
+            sayAlways(mc, "§7tool warnings: §c" + tel.toolWarnings() + " §8(near-broken pick, no spare)");
+        }
+        if (tel.deaths() > 0) {
+            sayAlways(mc, "§7deaths: §4§l" + tel.deaths());
+        } else {
+            sayAlways(mc, "§7deaths: §a§l0 §8— clean run");
+        }
     }
 
     /** Routine status chatter — suppressed in Quiet Mode so you don't get spammed while AFK. */

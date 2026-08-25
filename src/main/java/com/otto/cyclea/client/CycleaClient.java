@@ -167,6 +167,7 @@ public class CycleaClient implements ClientModInitializer {
     private float prevHp = Float.NaN;
     private int homeCd = 0;
     private int suffTicks = 0;   // consecutive ticks with head in a suffocating block
+    private boolean deathLatched = false;   // so one death counts once, not every dead tick
 
     /** Emergency /home when about to die or hit hard. Fires regardless of the bot.
      *  Reacts to the HAZARD (lava / fire / suffocation), not just to HP already being low —
@@ -182,6 +183,16 @@ public class CycleaClient implements ClientModInitializer {
             return;
         }
         float hp = mc.player.getHealth();
+
+        // --- death telemetry: count each death exactly once -------------
+        if (!mc.player.isAlive()) {
+            if (!deathLatched) {
+                com.otto.cyclea.feature.CycleaTelemetry.get().died();
+                deathLatched = true;
+            }
+        } else {
+            deathLatched = false;
+        }
 
         // --- proactive hazard escape ------------------------------------
         boolean inLava = mc.player.isInLava();
@@ -224,6 +235,7 @@ public class CycleaClient implements ClientModInitializer {
 
     /** Run the escape command with a loud alarm + banner, and stand the bot down. */
     private void fireHome(Minecraft mc, String reason) {
+        com.otto.cyclea.feature.CycleaTelemetry.get().escaped(reason);
         homeCd = 200;   // ~10s guard so it fires once, not every tick
         String cmd = CycleaConfig.get().homeCommand.replaceFirst("^/", "");
         mc.player.connection.sendCommand(cmd);
