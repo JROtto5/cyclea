@@ -250,7 +250,7 @@ public final class Autopilot {
             targetY = depthForDimension(mc);
             retarget(mc);
         }
-        say(mc, "§6[Autopilot] §b⛏ STRIP-MINE (GOD) §7— grabbing ALL ores @ Y-59, bases pinned");
+        say(mc, "§6[Autopilot] §b⛏ STRIP-MINE (GOD) §7— grabbing ALL ores @ Y-54, bases pinned");
     }
 
     /** MINE MONEY: calm, efficient strip-mine for the money ores (diamond, redstone, gold,
@@ -274,7 +274,7 @@ public final class Autopilot {
             targetY = depthForDimension(mc);
             retarget(mc);
         }
-        say(mc, "§6[Autopilot] §a$$ MINE MONEY §7— diamond/redstone/gold @ Y-59, smooth & steady");
+        say(mc, "§6[Autopilot] §a$$ MINE MONEY §7— diamond/redstone/gold @ Y-54, smooth & steady");
     }
 
     /** DIAMONDS: the diamond optimizer (Epic 4). Drops to the diamond peak (Y-59 in the
@@ -365,7 +365,10 @@ public final class Autopilot {
         if (dim == net.minecraft.world.level.Level.END) {
             return mc.player.blockPosition().getY();
         }
-        return -59;
+        // Y-54, not the Y-59 diamond peak: diamonds/redstone here are still near-peak and gold is
+        // slightly better, but open lava lakes concentrate at Y-54 and BELOW — holding at -54 keeps
+        // us above the worst of them. Fewer deaths = more kept Fortune picks = more money in practice.
+        return -54;
     }
 
     /** Panic Seal: wall yourself into a 1×1 pocket from mined blocks (the "doog" safe-hole).
