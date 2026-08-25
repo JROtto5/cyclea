@@ -1596,6 +1596,22 @@ public final class Autopilot {
             }
         }
 
+        // UNIVERSAL LAVA GUARD — the last line of defence, and it covers EVERY dig direction:
+        // forward tunnels, staircases, climbs, and the buried-ore chases. Never break a block that
+        // has lava touching it — opening it lets the lava flow onto us ("tried to swim in lava").
+        // If we were tunnelling toward an ore, give it up (blacklist) so we reroute around the lava
+        // instead of walking straight back into it next scan.
+        if (target != null && lavaNear(mc, target, 1)) {
+            if (oreGoal != null) {
+                oreBlacklist.add(oreGoal.asLong());
+                oreGoal = null;
+            }
+            key(mc, mc.options.keyAttack, false);
+            mc.gameMode.stopDestroyBlock();
+            breakingPos = null;
+            target = null;
+        }
+
         if (target != null) {
             mining = target;
             // Don't jump while breaking a block at or below our feet: a pending hop (jumpTicks set
