@@ -371,6 +371,18 @@ public final class Autopilot {
         return -54;
     }
 
+    /** Deepest Y that ORE-CHASING may descend to. The travel floor is {@code targetY} (held high,
+     *  ~-54, to dodge the open lava lakes), but the richest diamond/redstone band sits just below it
+     *  (peak ~Y-59). So a TARGETED ore detour — and only that, always guarded by {@link #lavaNear} —
+     *  is allowed to dig down to here and then climb back to targetY. Blind forward travel never
+     *  goes below targetY. Overworld only; Nether/End keep the old "don't dig below the lane" rule. */
+    private int oreDigFloor(Minecraft mc) {
+        if (mc.level.dimension() == net.minecraft.world.level.Level.OVERWORLD) {
+            return -59;   // diamond peak, one above the bedrock zone
+        }
+        return targetY - 1;
+    }
+
     /** Panic Seal: wall yourself into a 1×1 pocket from mined blocks (the "doog" safe-hole).
      *  Stops the bot and boxes in all four sides at foot + head level, plus the ceiling. */
     public void panicSeal(Minecraft mc) {
@@ -1351,7 +1363,7 @@ public final class Autopilot {
             if (odx * tdx + odz * tdz < 0 && odx * odx + odz * odz > 12) {
                 oreBlacklist.add(oreGoal.asLong());
                 oreGoal = null;
-            } else if (++oreGoalTicks > 120) {         // ~6s chasing one ore = give up (wider reach)
+            } else if (++oreGoalTicks > 200) {         // ~10s — long enough to tunnel to buried ore
                 oreBlacklist.add(oreGoal.asLong());
                 if (oreBlacklist.size() > 128) {
                     oreBlacklist.clear();
@@ -1537,9 +1549,11 @@ public final class Autopilot {
             pendingOreType = CycleaLedger.classify(itemPathBlock(mc, target));
         }
 
-        // if we've sunk below the target depth (e.g. wedged at Y-60 in the bedrock
-        // layer), climb back up to Y-59 — mine the block above head and hop up.
-        if (target == null && feet.getY() < targetY) {
+        // if we've sunk below the travel floor, climb back up — mine the block above head and hop up.
+        // BUT don't yank ourselves up while we're still chasing an ore at/below our feet: let the
+        // descend-to-ore branch below grab it first, THEN (oreGoal cleared) we climb back to targetY.
+        boolean chasingOreBelow = oreGoal != null && oreGoal.getY() <= feet.getY();
+        if (target == null && feet.getY() < targetY && !chasingOreBelow) {
             BlockPos up = feet.above(2);
             if (canMine(mc, up)) {
                 target = up;
@@ -1560,7 +1574,9 @@ public final class Autopilot {
                 } else if (passable(mc, up)) {
                     jumpTicks = 3;             // already clear → hop up toward it
                 }
-            } else if (dy <= -1 && feet.getY() > targetY) {
+            } else if (dy <= -1 && feet.getY() > oreDigFloor(mc)) {
+                // descend toward an ore below us — allowed BELOW the travel floor (down to the
+                // ore-dig floor / diamond peak) because this is a targeted grab, not blind travel.
                 BlockPos down = feet.below();
                 if (canMine(mc, down) && !lavaNear(mc, down, 2)) {   // never open the floor near lava
                     target = down;
@@ -1582,6 +1598,13 @@ public final class Autopilot {
 
         if (target != null) {
             mining = target;
+            // Don't jump while breaking a block at or below our feet: a pending hop (jumpTicks set
+            // last tick to climb toward an ore) lifts the crosshair off a low target so the break
+            // never lands — the "jumps and swings but nothing breaks" glitch. Plant feet and mine.
+            if (target.getY() <= feet.getY()) {
+                jumpTicks = 0;
+                key(mc, mc.options.keyJump, false);
+            }
             swingAt(mc, target);
         } else {
             // path clear: walk smooth and straight (body stays on the travel line);
@@ -2934,7 +2957,7 @@ public final class Autopilot {
             cells.add(feet.relative(h).below());   // ore in the floor just ahead
         }
         for (BlockPos p : cells) {
-            if (p.getY() < targetY - 1 || oreBlacklist.contains(p.asLong())) {
+            if (p.getY() < oreDigFloor(mc) || oreBlacklist.contains(p.asLong())) {
                 continue;   // don't dig into the bedrock zone, or re-grab a given-up ore
             }
             // Digging DOWN (floor / below feet) near lava is how it kept dying — require a 2-block
@@ -2983,7 +3006,7 @@ public final class Autopilot {
         double tdz = targetZ - c.getZ();
         BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
         for (int dx = -r; dx <= r; dx++) {
-            for (int dy = -3; dy <= 3; dy++) {   // never chase ores way above/below the lane
+            for (int dy = -6; dy <= 3; dy++) {   // reach down into the rich band below the -54 floor
                 if (dy < -r || dy > r) {
                     continue;
                 }
@@ -2994,13 +3017,15 @@ public final class Autopilot {
                         continue;
                     }
                     m.set(c.getX() + dx, c.getY() + dy, c.getZ() + dz);
-                    if (oreBlacklist.contains(m.asLong())) {
-                        continue;   // gave up on this one already
+                    if (m.getY() < oreDigFloor(mc) || oreBlacklist.contains(m.asLong())) {
+                        continue;   // below the ore-dig floor (bedrock zone), or gave up already
                     }
                     String path = BuiltInRegistries.BLOCK.getKey(
                         mc.level.getBlockState(m).getBlock()).getPath();
-                    if (CycleaConfig.get().wantsOre(path)
-                        && isExposed(mc, m) && !hasHazardNeighbor(mc, m)) {
+                    // NOTE: no isExposed() gate — we tunnel TO buried ore (Baritone-style), so an ore
+                    // encased in rock up to r blocks away still gets chased. hasHazardNeighbor keeps us
+                    // from tunnelling into an ore that's hugging lava.
+                    if (CycleaConfig.get().wantsOre(path) && !hasHazardNeighbor(mc, m)) {
                         double d = dx * dx + dy * dy + dz * dz;
                         if (d < bestD) {
                             bestD = d;
@@ -3030,10 +3055,10 @@ public final class Autopilot {
                         continue;
                     }
                     m.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
-                    if (m.getY() < targetY - 1 || oreBlacklist.contains(m.asLong())) {
+                    if (m.getY() < oreDigFloor(mc) || oreBlacklist.contains(m.asLong())) {
                         continue;   // don't chase a vein down into bedrock, or a given-up ore
                     }
-                    if (wantedOre(mc, m) && isExposed(mc, m) && !hasHazardNeighbor(mc, m)) {
+                    if (wantedOre(mc, m) && !hasHazardNeighbor(mc, m)) {   // buried vein blocks too
                         double d = dx * dx + dy * dy + dz * dz;
                         if (d < bestD) {
                             bestD = d;
