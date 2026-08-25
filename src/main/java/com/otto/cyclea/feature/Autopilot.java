@@ -1042,33 +1042,28 @@ public final class Autopilot {
             } else {
                 climbStall++;
             }
-            // stalled ~10s of trying with zero height gained → we're genuinely boxed at Y-60.
+            // stalled ~6s of trying with zero height gained → we're genuinely boxed in.
             // Take the human way out instead of spinning here forever: teleport home.
-            if (climbStall > 200) {
+            if (climbStall > 120) {
                 climbStall = 0;
                 escapeBoxedIn(mc);
                 return;
             }
-            // stalled ~3s → stop trusting findStepUp/stairs and just PILLAR STRAIGHT UP, the one
-            // escape that always works when there's headroom (we only need a block or two here).
-            if (climbStall > 60) {
-                BlockPos headB = feetC.above(2);
-                if (canMine(mc, headB)) {   // clear our own ceiling first
-                    swingAt(mc, headB);
-                    return;
-                }
-                if (player.onGround() && ensureHotbarBlock(mc)) {
-                    pillarSpot = feetC;     // MID-PILLAR LATCH fills this as we jump
-                    pillarTicks = 0;
-                    key(mc, mc.options.keyJump, true);
-                    return;
-                }
-                // no block to pillar with / not grounded — fall through and keep trying stairs
+            // MINE STAIRS UP — the escape the bot ALWAYS has the tools for (a pickaxe + solid rock).
+            // Find a wall to carve an ascending staircase into, clear the two blocks above the step,
+            // then jump forward ONTO the step (one block gained per cycle) and repeat up to travel
+            // depth. We only PLACE a block if there's no wall at all (an open cavern floor); every
+            // other case is pure mining — which is exactly "mine stairs up and jump on them".
+
+            // always clear our own ceiling first so there's room to jump
+            BlockPos head2 = feetC.above(2);
+            if (canMine(mc, head2)) {
+                swingAt(mc, head2);   // swingAt selects the pick + holds attack itself
+                return;
             }
 
-            // EASY WAY UP FIRST: if any neighbour is a 1-block step up (almost always the
-            // tunnel we just came from, whose floor sits at our target level), just BACK UP
-            // onto it — sprint-jump mounts it cleanly. This is what a player does.
+            // EASY WAY UP: an existing 1-block step beside us (usually the tunnel we came from) —
+            // just sprint-jump straight onto it, no digging needed.
             Direction up = findStepUp(mc, feetC);
             if (up != null) {
                 aim(player, up.toYRot(), -6f);
@@ -1078,62 +1073,59 @@ public final class Autopilot {
                 return;
             }
 
-            // JUST STAIR UP. One fixed direction, one dumb reliable loop:
-            // clear our own headroom → make sure there's a tread block ahead →
-            // clear the two blocks above it → walk into it (auto-jump climbs) → repeat.
             if (climbDir == null) {
                 climbDir = axisX
                     ? (targetX - player.getX() >= 0 ? Direction.EAST : Direction.WEST)
                     : (targetZ - player.getZ() >= 0 ? Direction.SOUTH : Direction.NORTH);
             }
 
-            // headroom above our own head (needed to step up)
-            BlockPos head2 = feetC.above(2);
-            if (canMine(mc, head2)) {
-                swingAt(mc, head2);   // swingAt selects the pick + holds attack itself
-                return;
+            // Pick a direction whose STEP block (ahead, at our level) is SOLID rock — its top face is
+            // the stair we'll jump onto. Rotate up to 4 ways from climbDir; skip anything by lava.
+            Direction stairDir = null;
+            Direction probe = climbDir;
+            for (int i = 0; i < 4; i++) {
+                BlockPos step = feetC.relative(probe);
+                if (!passable(mc, step) && !hazard(mc, step) && !hazard(mc, step.above())) {
+                    stairDir = probe;
+                    break;
+                }
+                probe = probe.getClockWise();
             }
 
-            BlockPos tread = feetC.relative(climbDir);   // the stair step we'll stand on
-            BlockPos c1 = tread.above();
-            BlockPos c2 = tread.above(2);
-
-            if (hazard(mc, tread) || hazard(mc, c1)) {
-                climbDir = climbDir.getClockWise();      // lava/water that way — turn the stair
-                return;
-            }
-            if (passable(mc, tread)) {
-                // no step to stand on — build one from the cobble stock, then re-arm the pick
-                if (place(mc, tread, "")) {
-                    ensurePickaxe(mc);
+            if (stairDir != null) {
+                climbDir = stairDir;
+                BlockPos step = feetC.relative(stairDir);
+                BlockPos c1 = step.above();      // feet space over the step
+                BlockPos c2 = step.above(2);     // head space over the step
+                if (canMine(mc, c1)) {
+                    swingAt(mc, c1);             // carve the stair (feet space)
                     return;
                 }
-                climbDir = climbDir.getClockWise();      // can't build here — turn
+                if (canMine(mc, c2)) {
+                    swingAt(mc, c2);             // carve the stair (head space)
+                    return;
+                }
+                if (passable(mc, c1) && passable(mc, c2)) {
+                    // stair carved — walk forward and jump ONTO the step (top face is one block up)
+                    ensurePickaxe(mc);
+                    aim(player, stairDir.toYRot(), 0f);
+                    key(mc, mc.options.keyUp, true);
+                    key(mc, mc.options.keyJump, true);
+                    return;
+                }
+                climbDir = climbDir.getClockWise();   // step's space blocked by unbreakable — rotate
                 return;
             }
-            if (canMine(mc, c1)) {
-                swingAt(mc, c1);                          // open the stair (feet space)
-                return;
-            }
-            if (canMine(mc, c2)) {
-                swingAt(mc, c2);                          // open the stair (head space)
-                return;
-            }
-            if (passable(mc, c1) && passable(mc, c2)) {
-                // stair is ready — walk into it; auto-jump lifts us onto the tread
-                ensurePickaxe(mc);
-                aim(player, climbDir.toYRot(), 0f);
-                key(mc, mc.options.keyUp, true);
-                key(mc, mc.options.keyJump, true);       // belt & braces with auto-jump
-                return;
-            }
-            // stair blocked by unbreakable — turn; if we've spun a while, pillar out instead
-            climbDir = climbDir.getClockWise();
-            if (climbTicks > 80 && player.onGround() && ensureHotbarBlock(mc)) {
-                pillarSpot = feetC;
+
+            // No wall in any direction (open cavern floor) — place ONE step block and pillar up.
+            if (player.onGround() && ensureHotbarBlock(mc)) {
+                pillarSpot = feetC;     // MID-PILLAR LATCH fills this as we jump
                 pillarTicks = 0;
                 key(mc, mc.options.keyJump, true);
+                return;
             }
+            // nothing to mine, nothing to place — turn; the watchdog /homes us if truly boxed.
+            climbDir = climbDir.getClockWise();
             return;
         }
         climbTicks = 0;
