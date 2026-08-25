@@ -855,6 +855,9 @@ public final class Autopilot {
     private double aliveZ;
     private int aliveInv = -1;
     private int restartCount = 0;
+    private int frozenRestarts = 0;           // consecutive dead-stall restarts in one pocket
+    private double frozenAnchorX = Double.NaN; // where the current dead-stall streak began
+    private double frozenAnchorZ = Double.NaN;
 
     /** True if it looked frozen and we just auto-restarted (so skip this tick's step). */
     private boolean frozenSoRestart(Minecraft mc) {
@@ -885,6 +888,27 @@ public final class Autopilot {
         deadTicks++;
         if (deadTicks >= 70) {        // ~3.5s of doing absolutely nothing → full restart
             deadTicks = 0;
+            // GENUINE boxed-in escalation. A restart re-heads a different way, which frees us in
+            // almost every case. But if we keep dead-stalling in the SAME little pocket without
+            // ever escaping it, we're truly sealed (bedrock/lava on every side) — take the human
+            // way out (/home) instead of restart-looping forever. This is driven by the honest
+            // zero-progress signal above, NOT by "didn't move horizontally," so it can't misfire
+            // while we're actively mining.
+            if (!Double.isNaN(frozenAnchorX)
+                    && Math.hypot(p.getX() - frozenAnchorX, p.getZ() - frozenAnchorZ) < 6) {
+                frozenRestarts++;
+            } else {
+                frozenRestarts = 1;
+                frozenAnchorX = p.getX();
+                frozenAnchorZ = p.getZ();
+            }
+            if (frozenRestarts >= 3) {   // three dead-stalls in the same 6-block pocket = sealed
+                frozenRestarts = 0;
+                frozenAnchorX = Double.NaN;
+                frozenAnchorZ = Double.NaN;
+                escapeBoxedIn(mc);
+                return true;
+            }
             restartCount++;
             releaseAll(mc);
             resetRunState();          // clears every transient state, just like a fresh engage
@@ -995,161 +1019,9 @@ public final class Autopilot {
             }
         }
 
-        if (feetC.getY() < targetY) {
-            climbTicks++;
-            key(mc, mc.options.keyUp, false);
-            key(mc, mc.options.keySprint, false);
-            key(mc, mc.options.keyAttack, false);   // released unless a mine-branch re-holds it
-            // AUTO-JUMP STAYS OFF (applyAfkSettings forced it off for the whole run). Turning it
-            // on here was the head-bang bug: vanilla auto-jump hops the instant we face a block,
-            // which knocks the crosshair off it and RESETS mining progress — "jumps up and hits
-            // its head twenty times, breaks nothing." We do our own single, deliberate hops below,
-            // and we NEVER hold jump while a solid block still occupies the space we'd rise into.
-
-            // CALM ORE GRAB while below target: clear any wanted ore beside us before climbing
-            // past it (this is the ore we dipped down for). Count it, then keep the vein.
-            if (pendingOre != null && mc.level.getBlockState(pendingOre).isAir()) {
-                oresMined++;
-                CycleaLedger.get().record(pendingOreType);
-                pendingOre = null;
-                pendingOreType = "";
-                climbStall = 0;
-            }
-            BlockPos climbOre = adjacentOre(mc, feetC);
-            if (climbOre != null && canMine(mc, climbOre)) {
-                climbStall = 0;
-                if (!climbOre.equals(pendingOre)) {
-                    pendingOre = climbOre;
-                    pendingOreType = CycleaLedger.classify(itemPathBlock(mc, climbOre));
-                }
-                mining = climbOre;
-                key(mc, mc.options.keyJump, false);   // plant feet — never jump while mining
-                swingAt(mc, climbOre);
-                return;
-            }
-
-            // WATCHDOG — progress = height gained. The rest of this branch is written so it ALWAYS
-            // does one real thing (mine a block, place a block, or hop), so a genuine stall only
-            // happens when every escape is unbreakable/hazard. Only then, ~6s in, take the /home exit.
-            if (feetC.getY() > climbLastY) {
-                climbLastY = feetC.getY();
-                climbStall = 0;
-            }
-            if (climbStall > 120) {
-                climbStall = 0;
-                escapeBoxedIn(mc);
-                return;
-            }
-
-            // MINE STAIRS UP. One action per tick, in strict order:
-            //   (1) clear our own two-block headroom (mine it — jump released);
-            //   (2) carve the two cells above the step ahead (mine — jump released);
-            //   (3) once both are air AND our headroom is clear, take ONE hop onto the step;
-            //   (4) if no wall in any direction (open cavern), pillar up one block.
-            // Every mine releases jump first, so a solid block is never in the way of a hop.
-
-            // (1) own headroom — need two clear blocks above to rise into.
-            BlockPos ceil = feetC.above(2);
-            if (canMine(mc, ceil)) {
-                key(mc, mc.options.keyJump, false);
-                mining = ceil;
-                climbStall = 0;
-                swingAt(mc, ceil);
-                return;
-            }
-            if (!passable(mc, ceil)) {
-                // ceiling is unbreakable/hazard — can't rise here. Shove sideways toward the goal
-                // and mine our way out from under it instead of jumping into it forever.
-                if (climbDir == null) {
-                    climbDir = axisX
-                        ? (targetX - player.getX() >= 0 ? Direction.EAST : Direction.WEST)
-                        : (targetZ - player.getZ() >= 0 ? Direction.SOUTH : Direction.NORTH);
-                }
-                BlockPos side = feetC.relative(climbDir);
-                if (canMine(mc, side)) {
-                    key(mc, mc.options.keyJump, false);
-                    mining = side;
-                    swingAt(mc, side);
-                    return;
-                }
-                if (canMine(mc, side.above())) {
-                    key(mc, mc.options.keyJump, false);
-                    mining = side.above();
-                    swingAt(mc, side.above());
-                    return;
-                }
-                if (passable(mc, side) && passable(mc, side.above())) {
-                    aim(player, climbDir.toYRot(), 0f);
-                    key(mc, mc.options.keyUp, true);   // walk out from under the low ceiling
-                } else {
-                    key(mc, mc.options.keyJump, false);
-                    climbDir = climbDir.getClockWise();
-                }
-                climbStall++;
-                return;
-            }
-
-            // headroom is clear — choose a stair direction. Prefer toward the goal, rotate to any
-            // workable wall. Persist climbDir so we carve a straight staircase, not a spiral.
-            if (climbDir == null) {
-                climbDir = axisX
-                    ? (targetX - player.getX() >= 0 ? Direction.EAST : Direction.WEST)
-                    : (targetZ - player.getZ() >= 0 ? Direction.SOUTH : Direction.NORTH);
-            }
-            for (int i = 0; i < 4; i++) {
-                Direction d = climbDir;
-                BlockPos step = feetC.relative(d);   // the step block (ahead, our level)
-                BlockPos sFeet = step.above();       // feet space over the step
-                BlockPos sHead = step.above(2);      // head space over the step
-                boolean safe = !hazard(mc, step) && !hazard(mc, sFeet) && !hazard(mc, sHead);
-                if (safe && !passable(mc, step)) {   // a solid wall to stair up onto
-                    // (2) carve the two cells above the step (feet then head) — jump released.
-                    if (canMine(mc, sFeet)) {
-                        key(mc, mc.options.keyJump, false);
-                        mining = sFeet;
-                        climbStall = 0;
-                        swingAt(mc, sFeet);
-                        return;
-                    }
-                    if (canMine(mc, sHead)) {
-                        key(mc, mc.options.keyJump, false);
-                        mining = sHead;
-                        climbStall = 0;
-                        swingAt(mc, sHead);
-                        return;
-                    }
-                    // (3) stair carved + headroom clear → ONE deliberate hop onto the step.
-                    if (passable(mc, sFeet) && passable(mc, sHead)) {
-                        ensurePickaxe(mc);
-                        aim(player, d.toYRot(), 0f);
-                        key(mc, mc.options.keyUp, true);
-                        key(mc, mc.options.keyJump, player.onGround());   // hop once, from ground only
-                        climbStall++;
-                        return;
-                    }
-                    // step's cells blocked by unbreakable — rotate to another wall.
-                }
-                climbDir = d.getClockWise();
-            }
-
-            // (4) no workable wall in any direction (open cavern floor) — pillar up one block.
-            if (player.onGround() && ensureHotbarBlock(mc)) {
-                pillarSpot = feetC;     // MID-PILLAR LATCH fills this as we jump
-                pillarTicks = 0;
-                key(mc, mc.options.keyJump, true);   // headroom already confirmed clear above
-                climbStall++;
-                return;
-            }
-            // nothing to mine, nothing to place, mid-air — wait a tick (don't spin the keys).
-            key(mc, mc.options.keyJump, false);
-            climbStall++;
-            return;
-        }
-        climbTicks = 0;
-        climbDir = null;
-        climbLastY = Integer.MIN_VALUE;
-        climbStall = 0;
-        pillarSpot = null;   // at/above target depth — no pillar pending
+        // NOTE: climbing back to travel depth is no longer a separate branch. It's handled by the
+        // unified movement core mine() at the end of this method (the ASCEND case of advance()),
+        // so it can never fight the forward logic or misfire a "boxed in" while it's mining fine.
 
         // 1c) inventory full — never just stop. First cash out with the server sell
         //     command (/sell all), then dump bulk cobbled-deepslate/junk (keeping a
@@ -1256,67 +1128,17 @@ public final class Autopilot {
             return;   // guard chose to stop
         }
 
-        // 4b) anti-stuck: it NEVER gives up — it escalates (shake → tower up →
-        //     redirect) until it frees itself, so it should never need you.
-        if (Double.isNaN(lastProgX)) {
-            lastProgX = player.getX();
-            lastProgZ = player.getZ();
-        }
-        if (Math.hypot(player.getX() - lastProgX, player.getZ() - lastProgZ) > 0.6) {
-            lastProgX = player.getX();
-            lastProgZ = player.getZ();
-            stuckTicks = 0;
-            // truly broke free of the pocket (5+ blocks from where we got boxed)? clear the cycle count
-            if (!Double.isNaN(boxAnchorX)
-                && Math.hypot(player.getX() - boxAnchorX, player.getZ() - boxAnchorZ) > 5) {
-                stuckCycles = 0;
-                boxAnchorX = Double.NaN;
-                boxAnchorZ = Double.NaN;
-            }
-        } else {
-            stuckTicks++;
-        }
-        if (stuckTicks == 40) {           // step 1: shake loose — drop targets, hop
-            mining = null;
-            if (oreGoal != null) {
-                oreBlacklist.add(oreGoal.asLong());
-                oreGoal = null;
-            }
-            detourTicks = 0;
-            jumpTicks = 6;
-        }
-        if (stuckTicks >= 90) {           // step 2: tower straight UP to escape the pocket
-            BlockPos up = player.blockPosition().above(2);
-            if (canMine(mc, up)) {
-                mining = up;
-                swingAt(mc, up);
-                jumpTicks = 4;
-                return;
-            }
-            if (passable(mc, up)) {
-                jumpTicks = 4;             // clear above → keep hopping up out of it
-            }
-        }
-        if (stuckTicks >= 170) {          // step 3: give up on THIS route, not the job —
-            startX = player.getX();       // re-anchor and head a different way, then retry
-            startZ = player.getZ();
-            axisX = !axisX;
-            detourDir = null;
-            detourTicks = 0;
-            oreGoal = null;
-            stuckTicks = 0;               // fresh attempt — never hard-stop
-            // count this failed escalation. Three in a row without escaping = genuinely
-            // boxed in (e.g. a lava pocket where every block is flood-guarded and can't
-            // be mined). Rather than loop forever, take the human way out: teleport home.
-            if (Double.isNaN(boxAnchorX)) {
-                boxAnchorX = player.getX();
-                boxAnchorZ = player.getZ();
-            }
-            if (++stuckCycles >= 3) {
-                escapeBoxedIn(mc);
-                return;
-            }
-        }
+        // 4b) NO "haven't-moved-horizontally" boxed-in detector anymore — that was the villain.
+        //     Standing still is EXACTLY what mining a wall looks like, so the old shake→tower→
+        //     redirect ladder kept declaring us "boxed in" while we were happily surrounded by
+        //     mineable deepslate, and its jumps knocked the crosshair off the block (the "jump up
+        //     and down, place blocks, break nothing" circus). The forward miner below treats
+        //     mineable deepslate as a path (see travelOk) and simply digs its way out in whatever
+        //     direction is clear — it CANNOT deadlock on rock it can break. The only genuine-stuck
+        //     safety net is frozenSoRestart() (run every tick before step()): it trips only after
+        //     ~3.5s of ZERO progress of ANY kind — no movement AND no block broken AND not eating —
+        //     which is what being truly sealed by unbreakable/lava actually looks like. Repeated
+        //     dead-stalls in the same pocket escalate to the /home escape inside that method.
         if (jumpTicks > 0) {
             key(mc, mc.options.keyJump, true);
             jumpTicks--;
@@ -1499,7 +1321,10 @@ public final class Autopilot {
                 lastMiningKey = k;
                 mineTicks = 0;
             }
-            if (mineTicks > 40 && !passable(mc, mining)) {
+            // ~5s, not 2s: a diamond pick clears deepslate in well under 5s even with imperfect
+            // aim/latency, so this only blacklists a block we genuinely can't break (unreachable
+            // through a wall, or an ore behind an obstacle) — never good deepslate we're mining.
+            if (mineTicks > 100 && !passable(mc, mining)) {
                 oreBlacklist.add(k);
                 if (oreBlacklist.size() > 256) {
                     oreBlacklist.clear();
