@@ -191,14 +191,25 @@ public class CycleaClient implements ClientModInitializer {
         suffTicks = headStuck ? suffTicks + 1 : 0;
 
         if (inLava) {
-            // rise toward air even if /home has a warmup — physical self-rescue buys time
+            // LAVA = drop everything and get out THIS instant. Swim up every tick, and re-issue
+            // /home repeatedly — a single /home is useless when the server's teleport warmup gets
+            // cancelled by the burn damage, so we keep re-issuing it (~every 12 ticks) in the hope
+            // one lands, while the jump physically lifts us toward the surface as the real lifeline.
             mc.player.setJumping(true);
+            if (CycleaConfig.get().escapeHome && mc.player.isAlive()) {
+                if (homeCd == 0) {
+                    fireHome(mc, "IN LAVA");
+                } else if (homeCd % 12 == 0) {
+                    mc.player.connection.sendCommand(
+                        CycleaConfig.get().homeCommand.replaceFirst("^/", ""));
+                }
+            }
+            prevHp = hp;
+            return;   // nothing else matters while we're burning
         }
 
         if (CycleaConfig.get().escapeHome && homeCd == 0 && mc.player.isAlive()) {
-            if (inLava) {
-                fireHome(mc, "IN LAVA");
-            } else if (suffTicks >= 2) {
+            if (suffTicks >= 2) {
                 fireHome(mc, "suffocating");
             } else if (onFire && hp <= 14f) {
                 fireHome(mc, "on fire, HP " + (int) hp);

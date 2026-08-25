@@ -1558,7 +1558,7 @@ public final class Autopilot {
                 }
             } else if (dy <= -1 && feet.getY() > targetY) {
                 BlockPos down = feet.below();
-                if (canMine(mc, down)) {
+                if (canMine(mc, down) && !lavaNear(mc, down, 2)) {   // never open the floor near lava
                     target = down;
                 }
             }
@@ -1570,8 +1570,9 @@ public final class Autopilot {
                 target = aheadHead;
             } else if (!passable(mc, aheadFeet)) {
                 target = aheadFeet;
-            } else if (feet.getY() > targetY && canMine(mc, aheadFeet.below())) {
-                target = aheadFeet.below();   // staircase down toward Y-59 (never into bedrock)
+            } else if (feet.getY() > targetY && canMine(mc, aheadFeet.below())
+                    && !lavaNear(mc, aheadFeet.below(), 2)) {
+                target = aheadFeet.below();   // staircase down toward Y-59 (never into bedrock/lava)
             }
         }
 
@@ -1758,6 +1759,25 @@ public final class Autopilot {
             BlockState st = mc.level.getBlockState(pos.relative(d));
             if (st.is(Blocks.LAVA) || st.is(Blocks.WATER)) {
                 return true;
+            }
+        }
+        return false;
+    }
+
+    /** Any lava within a cube of radius {@code r} around {@code c}. Used to keep the bot from
+     *  ever breaking DOWN into the floor near a lava pool — the deepslate mining band (Y-59..-64)
+     *  is riddled with lava lakes, and opening the floor there is how it kept dying. A 2-block
+     *  radius means we refuse to dig down unless there's a solid buffer of rock all around. */
+    private static boolean lavaNear(Minecraft mc, BlockPos c, int r) {
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dy = -r; dy <= r; dy++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    m.set(c.getX() + dx, c.getY() + dy, c.getZ() + dz);
+                    if (mc.level.getBlockState(m).is(Blocks.LAVA)) {
+                        return true;
+                    }
+                }
             }
         }
         return false;
@@ -2910,6 +2930,13 @@ public final class Autopilot {
         for (BlockPos p : cells) {
             if (p.getY() < targetY - 1 || oreBlacklist.contains(p.asLong())) {
                 continue;   // don't dig into the bedrock zone, or re-grab a given-up ore
+            }
+            // Digging DOWN (floor / below feet) near lava is how it kept dying — require a 2-block
+            // lava buffer before we ever break a block below us. Side/ceiling ore keeps the lighter
+            // direct-neighbour check so we still clear normal veins.
+            boolean digDown = p.getY() < feet.getY();
+            if (digDown && lavaNear(mc, p, 2)) {
+                continue;
             }
             String path = BuiltInRegistries.BLOCK.getKey(
                 mc.level.getBlockState(p).getBlock()).getPath();
