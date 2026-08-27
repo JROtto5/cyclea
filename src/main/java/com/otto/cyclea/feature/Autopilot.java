@@ -1019,9 +1019,161 @@ public final class Autopilot {
             }
         }
 
-        // NOTE: climbing back to travel depth is no longer a separate branch. It's handled by the
-        // unified movement core mine() at the end of this method (the ASCEND case of advance()),
-        // so it can never fight the forward logic or misfire a "boxed in" while it's mining fine.
+        if (feetC.getY() < targetY) {
+            climbTicks++;
+            key(mc, mc.options.keyUp, false);
+            key(mc, mc.options.keySprint, false);
+            key(mc, mc.options.keyAttack, false);   // released unless a mine-branch re-holds it
+            // AUTO-JUMP STAYS OFF (applyAfkSettings forced it off for the whole run). Turning it
+            // on here was the head-bang bug: vanilla auto-jump hops the instant we face a block,
+            // which knocks the crosshair off it and RESETS mining progress — "jumps up and hits
+            // its head twenty times, breaks nothing." We do our own single, deliberate hops below,
+            // and we NEVER hold jump while a solid block still occupies the space we'd rise into.
+
+            // CALM ORE GRAB while below target: clear any wanted ore beside us before climbing
+            // past it (this is the ore we dipped down for). Count it, then keep the vein.
+            if (pendingOre != null && mc.level.getBlockState(pendingOre).isAir()) {
+                oresMined++;
+                CycleaLedger.get().record(pendingOreType);
+                pendingOre = null;
+                pendingOreType = "";
+                climbStall = 0;
+            }
+            BlockPos climbOre = adjacentOre(mc, feetC);
+            if (climbOre != null && canMine(mc, climbOre)) {
+                climbStall = 0;
+                if (!climbOre.equals(pendingOre)) {
+                    pendingOre = climbOre;
+                    pendingOreType = CycleaLedger.classify(itemPathBlock(mc, climbOre));
+                }
+                mining = climbOre;
+                key(mc, mc.options.keyJump, false);   // plant feet — never jump while mining
+                swingAt(mc, climbOre);
+                return;
+            }
+
+            // WATCHDOG — progress = height gained. The rest of this branch is written so it ALWAYS
+            // does one real thing (mine a block, place a block, or hop), so a genuine stall only
+            // happens when every escape is unbreakable/hazard. Only then, ~6s in, take the /home exit.
+            if (feetC.getY() > climbLastY) {
+                climbLastY = feetC.getY();
+                climbStall = 0;
+            }
+            if (climbStall > 120) {
+                climbStall = 0;
+                escapeBoxedIn(mc);
+                return;
+            }
+
+            // MINE STAIRS UP. One action per tick, in strict order:
+            //   (1) clear our own two-block headroom (mine it — jump released);
+            //   (2) carve the two cells above the step ahead (mine — jump released);
+            //   (3) once both are air AND our headroom is clear, take ONE hop onto the step;
+            //   (4) if no wall in any direction (open cavern), pillar up one block.
+            // Every mine releases jump first, so a solid block is never in the way of a hop.
+
+            // (1) own headroom — need two clear blocks above to rise into.
+            BlockPos ceil = feetC.above(2);
+            if (canMine(mc, ceil)) {
+                key(mc, mc.options.keyJump, false);
+                mining = ceil;
+                climbStall = 0;
+                swingAt(mc, ceil);
+                return;
+            }
+            if (!passable(mc, ceil)) {
+                // ceiling is unbreakable/hazard — can't rise here. Shove sideways toward the goal
+                // and mine our way out from under it instead of jumping into it forever.
+                if (climbDir == null) {
+                    climbDir = axisX
+                        ? (targetX - player.getX() >= 0 ? Direction.EAST : Direction.WEST)
+                        : (targetZ - player.getZ() >= 0 ? Direction.SOUTH : Direction.NORTH);
+                }
+                BlockPos side = feetC.relative(climbDir);
+                if (canMine(mc, side)) {
+                    key(mc, mc.options.keyJump, false);
+                    mining = side;
+                    swingAt(mc, side);
+                    return;
+                }
+                if (canMine(mc, side.above())) {
+                    key(mc, mc.options.keyJump, false);
+                    mining = side.above();
+                    swingAt(mc, side.above());
+                    return;
+                }
+                if (passable(mc, side) && passable(mc, side.above())) {
+                    aim(player, climbDir.toYRot(), 0f);
+                    key(mc, mc.options.keyUp, true);   // walk out from under the low ceiling
+                } else {
+                    key(mc, mc.options.keyJump, false);
+                    climbDir = climbDir.getClockWise();
+                }
+                climbStall++;
+                return;
+            }
+
+            // headroom is clear — choose a stair direction. Prefer toward the goal, rotate to any
+            // workable wall. Persist climbDir so we carve a straight staircase, not a spiral.
+            if (climbDir == null) {
+                climbDir = axisX
+                    ? (targetX - player.getX() >= 0 ? Direction.EAST : Direction.WEST)
+                    : (targetZ - player.getZ() >= 0 ? Direction.SOUTH : Direction.NORTH);
+            }
+            for (int i = 0; i < 4; i++) {
+                Direction d = climbDir;
+                BlockPos step = feetC.relative(d);   // the step block (ahead, our level)
+                BlockPos sFeet = step.above();       // feet space over the step
+                BlockPos sHead = step.above(2);      // head space over the step
+                boolean safe = !hazard(mc, step) && !hazard(mc, sFeet) && !hazard(mc, sHead);
+                if (safe && !passable(mc, step)) {   // a solid wall to stair up onto
+                    // (2) carve the two cells above the step (feet then head) — jump released.
+                    if (canMine(mc, sFeet)) {
+                        key(mc, mc.options.keyJump, false);
+                        mining = sFeet;
+                        climbStall = 0;
+                        swingAt(mc, sFeet);
+                        return;
+                    }
+                    if (canMine(mc, sHead)) {
+                        key(mc, mc.options.keyJump, false);
+                        mining = sHead;
+                        climbStall = 0;
+                        swingAt(mc, sHead);
+                        return;
+                    }
+                    // (3) stair carved + headroom clear → ONE deliberate hop onto the step.
+                    if (passable(mc, sFeet) && passable(mc, sHead)) {
+                        ensurePickaxe(mc);
+                        aim(player, d.toYRot(), 0f);
+                        key(mc, mc.options.keyUp, true);
+                        key(mc, mc.options.keyJump, player.onGround());   // hop once, from ground only
+                        climbStall++;
+                        return;
+                    }
+                    // step's cells blocked by unbreakable — rotate to another wall.
+                }
+                climbDir = d.getClockWise();
+            }
+
+            // (4) no workable wall in any direction (open cavern floor) — pillar up one block.
+            if (player.onGround() && ensureHotbarBlock(mc)) {
+                pillarSpot = feetC;     // MID-PILLAR LATCH fills this as we jump
+                pillarTicks = 0;
+                key(mc, mc.options.keyJump, true);   // headroom already confirmed clear above
+                climbStall++;
+                return;
+            }
+            // nothing to mine, nothing to place, mid-air — wait a tick (don't spin the keys).
+            key(mc, mc.options.keyJump, false);
+            climbStall++;
+            return;
+        }
+        climbTicks = 0;
+        climbDir = null;
+        climbLastY = Integer.MIN_VALUE;
+        climbStall = 0;
+        pillarSpot = null;   // at/above target depth — no pillar pending
 
         // 1c) inventory full — never just stop. First cash out with the server sell
         //     command (/sell all), then dump bulk cobbled-deepslate/junk (keeping a

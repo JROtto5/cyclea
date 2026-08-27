@@ -229,6 +229,11 @@ public final class TargetScanner {
         CycleaState state = CycleaState.get();
         List<BlockEntity> loaded = loadedBlockEntities(mc, level);
 
+        // End cities/ships put their loot chests up at Y ~55-100, so the Y20 "am I
+        // deep enough to be a base, not a surface hut" filter would hide every one.
+        // In the End that filter is wrong: count chests at ANY height, like shulkers.
+        boolean inEnd = level.dimension() == net.minecraft.world.level.Level.END;
+
         List<ContainerHit> containers = new ArrayList<>();
         int chestsTotal = 0;
         int shulkersTotal = 0;
@@ -237,7 +242,7 @@ public final class TargetScanner {
             boolean chest = (be instanceof ChestBlockEntity                        // covers trapped
                 || be instanceof BarrelBlockEntity
                 || be instanceof EnderChestBlockEntity)
-                && be.getBlockPos().getY() <= CHEST_MAX_Y;                         // below Y20
+                && (inEnd || be.getBlockPos().getY() <= CHEST_MAX_Y);              // any Y in the End, else below Y20
             boolean station = isStation(be);                                       // furnaces etc. (ruins signal)
             if (shulker) {
                 shulkersTotal++;
@@ -259,7 +264,11 @@ public final class TargetScanner {
             }
         }
 
-        List<Base> bases = detectBases(containers, 12, 3);
+        // End cities are spread across tall towers (~2 chests per tower, towers
+        // 15-25 apart), so widen the cluster reach and drop the min size to 2 in
+        // the End — one tower is enough to flag "city here", and the flood-fill
+        // still merges a whole city into a single base marker.
+        List<Base> bases = detectBases(containers, inEnd ? 24 : 12, inEnd ? 2 : 3);
 
         int[] entities = countEntities(mc, level);
 
