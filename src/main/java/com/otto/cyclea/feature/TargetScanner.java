@@ -229,10 +229,14 @@ public final class TargetScanner {
         CycleaState state = CycleaState.get();
         List<BlockEntity> loaded = loadedBlockEntities(mc, level);
 
-        // End cities/ships put their loot chests up at Y ~55-100, so the Y20 "am I
-        // deep enough to be a base, not a surface hut" filter would hide every one.
-        // In the End that filter is wrong: count chests at ANY height, like shulkers.
+        // The Y20 "am I deep enough to be a base, not a surface hut" filter only makes
+        // sense while the miner is tunnelling underground. When you're EXPLORING with
+        // the finder (miner off — flying the End, roaming the Nether/Overworld), you
+        // want every container at any height: End cities (Y55-100), Nether bastions,
+        // woodland mansions, jungle temples all sit well above Y20. So: lift the cap
+        // in the End always, and everywhere else whenever the miner isn't running.
         boolean inEnd = level.dimension() == net.minecraft.world.level.Level.END;
+        boolean allHeights = inEnd || !Autopilot.get().isActive();
 
         List<ContainerHit> containers = new ArrayList<>();
         int chestsTotal = 0;
@@ -242,7 +246,7 @@ public final class TargetScanner {
             boolean chest = (be instanceof ChestBlockEntity                        // covers trapped
                 || be instanceof BarrelBlockEntity
                 || be instanceof EnderChestBlockEntity)
-                && (inEnd || be.getBlockPos().getY() <= CHEST_MAX_Y);              // any Y in the End, else below Y20
+                && (allHeights || be.getBlockPos().getY() <= CHEST_MAX_Y);        // any Y when exploring, else below Y20
             boolean station = isStation(be);                                       // furnaces etc. (ruins signal)
             if (shulker) {
                 shulkersTotal++;
@@ -264,11 +268,12 @@ public final class TargetScanner {
             }
         }
 
-        // End cities are spread across tall towers (~2 chests per tower, towers
-        // 15-25 apart), so widen the cluster reach and drop the min size to 2 in
-        // the End — one tower is enough to flag "city here", and the flood-fill
-        // still merges a whole city into a single base marker.
-        List<Base> bases = detectBases(containers, inEnd ? 24 : 12, inEnd ? 2 : 3);
+        // End cities spread across tall towers (~2 chests each, 15-25 apart), and
+        // most explore-worthy structures (bastions, mansions) are big too — so when
+        // exploring widen the cluster reach and drop the min size to 2 (one tower/room
+        // flags the structure; the flood-fill still merges it into one base marker).
+        // While mining, keep the tight 12/3 so scattered ore-cave chests don't merge.
+        List<Base> bases = detectBases(containers, inEnd ? 24 : (allHeights ? 16 : 12), allHeights ? 2 : 3);
 
         int[] entities = countEntities(mc, level);
 

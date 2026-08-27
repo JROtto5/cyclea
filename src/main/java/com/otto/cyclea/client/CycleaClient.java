@@ -407,11 +407,13 @@ public class CycleaClient implements ClientModInitializer {
             if (++oreScanCounter >= 30) {   // lighter cadence + smaller cube = less CPU/lag
                 oreScanCounter = 0;
                 st.setOreBlips(TargetScanner.scanOres(mc, 12));
-                // In the End you're flying, not tunnelling — reach out to the whole
-                // loaded area so End-city chests/shulkers ping from the air, not just
-                // the 32-block bubble that suits underground mining.
+                // Reach the container scan out to match how you're playing: flying the
+                // End (160) or roaming/exploring anywhere with the miner off (96) want a
+                // wide net so structures ping from a distance; tunnelling underground
+                // keeps the tight 32-block bubble so it stays cheap and local.
                 boolean end = mc.level.dimension() == net.minecraft.world.level.Level.END;
-                st.setContainerBlips(TargetScanner.scanContainers(mc, end ? 160 : 32));
+                boolean exploring = !Autopilot.get().isActive();
+                st.setContainerBlips(TargetScanner.scanContainers(mc, end ? 160 : (exploring ? 96 : 32)));
             }
         } else {
             st.setOreBlips(java.util.List.of());
