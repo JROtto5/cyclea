@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.otto.cyclea.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "BlockStateBaseMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

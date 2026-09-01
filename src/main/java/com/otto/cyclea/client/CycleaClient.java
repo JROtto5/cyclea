@@ -3,6 +3,7 @@ package com.otto.cyclea.client;
 import com.otto.cyclea.CycleaConfig;
 import com.otto.cyclea.CycleaState;
 import com.otto.cyclea.feature.Autopilot;
+import com.otto.cyclea.feature.CycleaXray;
 import com.otto.cyclea.feature.MinimapBridge;
 import com.otto.cyclea.feature.TargetScanner;
 import net.fabricmc.api.ClientModInitializer;
@@ -50,6 +51,7 @@ public class CycleaClient implements ClientModInitializer {
     private KeyMapping clearLogKey;
     private KeyMapping configKey;
     private KeyMapping freeCursorKey;
+    private KeyMapping xrayKey;
     private int watchCounter = 0;
     private int watchAlertCd = 0;
     private int tickCounter = 0;
@@ -71,6 +73,7 @@ public class CycleaClient implements ClientModInitializer {
         clearLogKey = reg("key.cyclea.clearlog", GLFW.GLFW_KEY_C);
         configKey = reg("key.cyclea.config", GLFW.GLFW_KEY_J);
         freeCursorKey = reg("key.cyclea.freecursor", GLFW.GLFW_KEY_U);
+        xrayKey = reg("key.cyclea.xray", GLFW.GLFW_KEY_X);
 
         CycleaConfig.get().load();
         HudElementRegistry.addLast(
@@ -375,6 +378,13 @@ public class CycleaClient implements ClientModInitializer {
             } else {
                 say(mc, "§b🖱 cursor recaptured");
             }
+        }
+        while (xrayKey.consumeClick()) {
+            boolean on = CycleaXray.toggle(mc);
+            say(mc, on
+                ? "§b§l👁 X-RAY on §r§7— terrain hidden, ores exposed. §8[X] to turn off§r"
+                  + (CycleaConfig.get().oreEsp ? "" : " §8(tip: also seeks with the [ radar)")
+                : "§b👁 X-ray off §7— world restored");
         }
         while (searchModeKey.consumeClick()) {
             String m = Autopilot.get().toggleSearchMode(mc);

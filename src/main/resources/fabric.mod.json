@@ -14,6 +14,9 @@
   "license": "MIT",
   "icon": "assets/cyclea/icon.png",
   "environment": "client",
+  "mixins": [
+    "cyclea.mixins.json"
+  ],
   "entrypoints": {
     "client": [
       "com.otto.cyclea.client.CycleaClient"
