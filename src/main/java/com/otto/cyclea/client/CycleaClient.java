@@ -382,9 +382,8 @@ public class CycleaClient implements ClientModInitializer {
         while (xrayKey.consumeClick()) {
             boolean on = CycleaXray.toggle(mc);
             say(mc, on
-                ? "§b§l👁 X-RAY on §r§7— terrain hidden, ores exposed. §8[X] to turn off§r"
-                  + (CycleaConfig.get().oreEsp ? "" : " §8(tip: also seeks with the [ radar)")
-                : "§b👁 X-ray off §7— world restored");
+                ? "§b§l👁 X-RAY on §r§7— press §fF3+A§7 to refresh chunks. §8[X] to turn off§r"
+                : "§b👁 X-ray off §7— press §fF3+A§7 to restore the world");
         }
         while (searchModeKey.consumeClick()) {
             String m = Autopilot.get().toggleSearchMode(mc);

@@ -57,14 +57,18 @@ public final class CycleaXray {
         return ENABLED && !reveal.contains(state.getBlock());
     }
 
-    /** Flip X-ray and force every loaded section to re-mesh so it changes instantly. */
+    /**
+     * Flip X-ray. We do NOT force a chunk reload from here: 26.2 removed the old
+     * {@code LevelRenderer.allChanged()}, and its {@code resetLevelRenderData()} nulls
+     * the renderer's viewArea WITHOUT rebuilding it — the next render frame then NPEs
+     * (that was the [X] crash). There's no safe no-arg "rebuild all chunks" to call, so
+     * the player refreshes with vanilla F3+A (Reload Chunks), which reallocates properly.
+     * Chunks also pick up the change as they naturally re-mesh.
+     */
     public static boolean toggle(Minecraft mc) {
         ENABLED = !ENABLED;
         if (ENABLED) {
             rebuild();
-        }
-        if (mc.levelRenderer != null) {
-            mc.levelRenderer.resetLevelRenderData();   // 26.2's "rebuild all chunks"
         }
         return ENABLED;
     }
