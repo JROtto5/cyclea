@@ -56,6 +56,7 @@ public class CycleaClient implements ClientModInitializer {
     private int watchAlertCd = 0;
     private int tickCounter = 0;
     private int oreScanCounter = 0;
+    private int terrainScanCounter = 0;
     private boolean wasAlive = true;
     private List<TargetScanner.Base> lastBases = List.of();
 
@@ -89,7 +90,7 @@ public class CycleaClient implements ClientModInitializer {
                 if (m.player == null) {
                     return;
                 }
-                if (CycleaConfig.get().oreEsp || CycleaConfig.get().tracers) {
+                if (CycleaConfig.get().oreEsp || CycleaConfig.get().tracers || CycleaXray.ENABLED) {
                     CycleaHud.renderWorldOverlay(gx, m, st);
                 }
                 CycleaHud.renderBaseLog(gx, m, st);
@@ -411,8 +412,8 @@ public class CycleaClient implements ClientModInitializer {
         // drive the bot every tick (it self-guards and no-ops when off)
         Autopilot.get().tick(mc);
 
-        // ore X-ray: whenever search/auto is on, plot selected ores on the radar (through walls)
-        if ((st.isActive() || Autopilot.get().isActive()) && mc.level != null) {
+        // ore X-ray radar (through walls) whenever search/auto/X-ray is on
+        if ((st.isActive() || Autopilot.get().isActive() || CycleaXray.ENABLED) && mc.level != null) {
             if (++oreScanCounter >= 30) {   // lighter cadence + smaller cube = less CPU/lag
                 oreScanCounter = 0;
                 st.setOreBlips(TargetScanner.scanOres(mc, 12));
@@ -424,9 +425,19 @@ public class CycleaClient implements ClientModInitializer {
                 boolean exploring = !Autopilot.get().isActive();
                 st.setContainerBlips(TargetScanner.scanContainers(mc, end ? 160 : (exploring ? 96 : 32)));
             }
+            // terrain outline on a snappier beat so the walls keep up as you walk
+            if (CycleaXray.ENABLED) {
+                if (++terrainScanCounter >= 6) {
+                    terrainScanCounter = 0;
+                    st.setTerrainBlips(TargetScanner.scanTerrain(mc, 11));
+                }
+            } else if (!st.getTerrainBlips().isEmpty()) {
+                st.setTerrainBlips(java.util.List.of());
+            }
         } else {
             st.setOreBlips(java.util.List.of());
             st.setContainerBlips(java.util.List.of());
+            st.setTerrainBlips(java.util.List.of());
         }
 
         if (!st.isActive() || mc.level == null) {

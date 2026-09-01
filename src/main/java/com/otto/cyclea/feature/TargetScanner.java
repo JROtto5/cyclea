@@ -7,6 +7,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.monster.Monster;
@@ -160,6 +161,55 @@ public final class TargetScanner {
             return 15;
         }
         return 5;   // coal / everything else
+    }
+
+    /**
+     * X-ray outline scan: nearby SOLID terrain blocks that border air — i.e. the walls,
+     * floor and ceiling of the tunnel/cave you're in — so the X-ray overlay can trace
+     * them and you can see where you're going instead of a void full of floating ores.
+     * Interior blocks (all six neighbours solid) are skipped, so it reads as an outline
+     * not a fill. Revealed resources are skipped (they're already shown). Returns
+     * {x, y, z, dist2} absolute, nearest-first, capped. Empty unless X-ray is on.
+     */
+    public static List<int[]> scanTerrain(Minecraft mc, int radius) {
+        List<int[]> out = new ArrayList<>();
+        ClientLevel level = mc.level;
+        if (level == null || mc.player == null || !CycleaXray.ENABLED) {
+            return out;
+        }
+        BlockPos p = mc.player.blockPosition();
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
+        BlockPos.MutableBlockPos n = new BlockPos.MutableBlockPos();
+        scan:
+        for (int dy = -radius; dy <= radius; dy++) {
+            for (int dx = -radius; dx <= radius; dx++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    m.set(p.getX() + dx, p.getY() + dy, p.getZ() + dz);
+                    BlockState st = level.getBlockState(m);
+                    // solid wall you'd hit, not air, and not a resource we're revealing
+                    if (st.isAir() || !st.blocksMotion() || !CycleaXray.hidden(st)) {
+                        continue;
+                    }
+                    boolean surface = false;
+                    for (Direction d : Direction.values()) {
+                        n.set(m.getX() + d.getStepX(), m.getY() + d.getStepY(), m.getZ() + d.getStepZ());
+                        if (level.getBlockState(n).isAir()) {
+                            surface = true;
+                            break;
+                        }
+                    }
+                    if (!surface) {
+                        continue;
+                    }
+                    out.add(new int[]{m.getX(), m.getY(), m.getZ(), dx * dx + dy * dy + dz * dz});
+                    if (out.size() >= 1200) {
+                        break scan;
+                    }
+                }
+            }
+        }
+        out.sort(java.util.Comparator.comparingInt(o -> o[3]));   // nearest surfaces first
+        return out.size() > 500 ? new ArrayList<>(out.subList(0, 500)) : out;
     }
 
     /** Nearby containers (chests/barrels/shulkers) within {@code radius} as {x,y,z,rgb}

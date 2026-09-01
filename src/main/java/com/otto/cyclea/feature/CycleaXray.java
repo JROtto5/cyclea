@@ -35,16 +35,34 @@ public final class CycleaXray {
     /** Blocks to KEEP visible while X-ray is on. Rebuilt from the ore config on each toggle. */
     private static volatile Set<Block> reveal = new HashSet<>();
 
-    /** Snapshot the current ore whitelist into a fast block-identity set. */
+    /** Snapshot EVERY resource block into a fast block-identity set. X-ray reveals all
+     *  of them (not just the miner's current ore filter) — every ore, raw/metal/gem block,
+     *  ancient debris, budding amethyst, glowstone, spawners and vaults. */
     public static void rebuild() {
         Set<Block> set = new HashSet<>();
         for (Block b : BuiltInRegistries.BLOCK) {
-            String path = BuiltInRegistries.BLOCK.getKey(b).getPath();
-            if (CycleaConfig.get().wantsOre(path)) {
+            if (isResource(BuiltInRegistries.BLOCK.getKey(b).getPath())) {
                 set.add(b);
             }
         }
         reveal = set;
+    }
+
+    /** Everything worth seeing through walls — kept broad on purpose. */
+    private static boolean isResource(String p) {
+        if (p.endsWith("_ore") || p.contains("_ore_") || p.equals("ancient_debris")) {
+            return true;
+        }
+        switch (p) {
+            case "diamond_block": case "emerald_block": case "gold_block": case "iron_block":
+            case "netherite_block": case "copper_block": case "coal_block": case "lapis_block":
+            case "redstone_block": case "raw_iron_block": case "raw_copper_block": case "raw_gold_block":
+            case "budding_amethyst": case "amethyst_cluster": case "glowstone": case "gilded_blackstone":
+            case "spawner": case "trial_spawner": case "vault":
+                return true;
+            default:
+                return false;
+        }
     }
 
     /**

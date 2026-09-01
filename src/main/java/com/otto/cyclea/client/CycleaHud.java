@@ -3,6 +3,7 @@ package com.otto.cyclea.client;
 import com.otto.cyclea.CycleaConfig;
 import com.otto.cyclea.CycleaState;
 import com.otto.cyclea.feature.Autopilot;
+import com.otto.cyclea.feature.CycleaXray;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.minecraft.client.Camera;
 import net.minecraft.client.DeltaTracker;
@@ -27,7 +28,7 @@ public class CycleaHud implements HudElement {
         CycleaState s = CycleaState.get();
         // see-through overlay + big alerts draw independent of the base-finder panel
         if (mc.player != null) {
-            if (CycleaConfig.get().oreEsp || CycleaConfig.get().tracers) {
+            if (CycleaConfig.get().oreEsp || CycleaConfig.get().tracers || CycleaXray.ENABLED) {
                 renderWorldOverlay(g, mc, s);
             }
             renderBaseLog(g, mc, s);
@@ -196,6 +197,28 @@ public class CycleaHud implements HudElement {
         boolean tracers = CycleaConfig.get().tracers;
         int ox = p.gw / 2;
         int oy = p.gh - 2;   // tracers fan out from the bottom-center
+
+        // X-RAY terrain outline: faint boxes tracing the nearby walls / floor / ceiling
+        // (fluids like lava still render on their own, so hazards stay visible). Drawn
+        // first, so the solid ore boxes below sit on top of it.
+        if (CycleaXray.ENABLED) {
+            int tn = 0;
+            for (int[] t : s.getTerrainBlips()) {
+                int[] sp = p.to(t[0] + 0.5, t[1] + 0.5, t[2] + 0.5);
+                if (sp == null || sp[0] < 0 || sp[0] > p.gw || sp[1] < 0 || sp[1] > p.gh) {
+                    continue;
+                }
+                int half = Math.max(1, Math.min(22, (int) (0.60 / Math.max(1, sp[2]) * p.f)));
+                int col = 0x66AEC4D6;   // soft translucent blue-grey wireframe
+                g.fill(sp[0] - half, sp[1] - half, sp[0] + half, sp[1] - half + 1, col);
+                g.fill(sp[0] - half, sp[1] + half - 1, sp[0] + half, sp[1] + half, col);
+                g.fill(sp[0] - half, sp[1] - half, sp[0] - half + 1, sp[1] + half, col);
+                g.fill(sp[0] + half - 1, sp[1] - half, sp[0] + half, sp[1] + half, col);
+                if (++tn >= 500) {
+                    break;
+                }
+            }
+        }
 
         // ore boxes (+ optional tracer to each)
         int drawn = 0;

@@ -258,6 +258,16 @@ public final class CycleaState {
     }
 
     // container tracer targets: {x, y, z, rgb}
+    private volatile List<int[]> terrainBlips = List.of();
+
+    public List<int[]> getTerrainBlips() {
+        return terrainBlips;
+    }
+
+    public void setTerrainBlips(List<int[]> b) {
+        this.terrainBlips = b;
+    }
+
     private volatile List<int[]> containerBlips = List.of();
 
     public List<int[]> getContainerBlips() {
